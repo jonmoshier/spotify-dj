@@ -10,7 +10,7 @@ A Traktor-style terminal DJ app for Spotify. Dual decks, crossfader, BPM/key dis
 
 1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
 2. Create a new app
-3. Add `http://localhost:8888/callback` as a Redirect URI
+3. Add `http://127.0.0.1:8888/callback` as a Redirect URI
 4. Copy your **Client ID**
 
 ### 2. Configure

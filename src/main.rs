@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
             "No client_id configured.\n\
             \n\
             1. Go to https://developer.spotify.com/dashboard and create an app.\n\
-            2. Set the Redirect URI to: http://localhost:8888/callback\n\
+            2. Set the Redirect URI to: http://127.0.0.1:8888/callback\n\
             3. Copy your Client ID into: {}\n\
             \n\
             Example:\n\

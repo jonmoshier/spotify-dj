@@ -11,7 +11,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 
 const REDIRECT_PORT: u16 = 8888;
-const REDIRECT_URI: &str = "http://localhost:8888/callback";
+const REDIRECT_URI: &str = "http://127.0.0.1:8888/callback";
 const TOKEN_FILE: &str = "tokens.json";
 
 /// Persisted token data written to ~/.config/spotify-dj/tokens.json.
@@ -110,7 +110,7 @@ impl SpotifyAuth {
         let code = request_line
             .split_whitespace()
             .nth(1)
-            .and_then(|path| url::Url::parse(&format!("http://localhost{path}")).ok())
+            .and_then(|path| url::Url::parse(&format!("http://127.0.0.1{path}")).ok())
             .and_then(|u| {
                 u.query_pairs()
                     .find(|(k, _)| k == "code")
