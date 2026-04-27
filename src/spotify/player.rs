@@ -1,25 +1,28 @@
 use anyhow::{Context, Result};
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::{
-    Session,
     authentication::Credentials,
     config::{DeviceType, SessionConfig},
+    Session,
 };
 use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::{
     audio_backend,
     config::{AudioFormat, Bitrate, PlayerConfig},
-    mixer::{Mixer, MixerConfig, softmixer::SoftMixer},
+    mixer::{softmixer::SoftMixer, Mixer, MixerConfig},
     player::{Player, PlayerEventChannel},
 };
 use std::{sync::Arc, time::Duration};
+use tokio::sync::watch;
 
+use crate::audio::{bpm::BpmDetector, sink::TeeSink};
 use crate::config::Config;
 
 pub struct SpotifyPlayer {
     pub spirc: Spirc,
     pub player: Arc<Player>,
     pub session: Session,
+    pub bpm_rx: watch::Receiver<Option<f32>>,
 }
 
 impl SpotifyPlayer {
@@ -30,7 +33,6 @@ impl SpotifyPlayer {
         };
 
         let credentials = Credentials::with_access_token(&access_token);
-
         let session = Session::new(session_config, None);
 
         let mixer =
@@ -38,7 +40,6 @@ impl SpotifyPlayer {
 
         let player_config = PlayerConfig {
             bitrate: Bitrate::Bitrate320,
-            // Emit PositionChanged every second so the UI progress bar updates.
             position_update_interval: Some(Duration::from_secs(1)),
             ..Default::default()
         };
@@ -46,15 +47,25 @@ impl SpotifyPlayer {
         let audio_format = AudioFormat::default();
         let volume_getter = mixer.get_soft_volume();
 
+        // PCM channel: audio thread → BPM detector thread
+        let (pcm_tx, pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f64>>(128);
+        // BPM channel: detector thread → event loop (watch = always reads latest value)
+        let (bpm_tx, bpm_rx) = watch::channel::<Option<f32>>(None);
+
         let sink_builder = audio_backend::find(None).expect("no audio backend found");
         let player = Player::new(player_config, session.clone(), volume_getter, move || {
-            sink_builder(None, audio_format)
+            let real_sink = sink_builder(None, audio_format);
+            Box::new(TeeSink::new(real_sink, pcm_tx))
         });
+
+        // BPM detector runs in a dedicated OS thread (blocking recv loop).
+        let detector = BpmDetector::new(pcm_rx, bpm_tx);
+        std::thread::spawn(move || detector.run());
 
         let connect_config = ConnectConfig {
             name: config.playback.device_name.clone(),
             device_type: DeviceType::Computer,
-            initial_volume: (config.ui.default_volume as u16) * 655, // 0–100 → 0–65535
+            initial_volume: (config.ui.default_volume as u16) * 655,
             ..Default::default()
         };
 
@@ -68,14 +79,9 @@ impl SpotifyPlayer {
         .await
         .context("failed to create Spirc")?;
 
-        // Drive the Spirc state machine in the background.
         tokio::spawn(spirc_task);
 
-        Ok(Self {
-            spirc,
-            player,
-            session,
-        })
+        Ok(Self { spirc, player, session, bpm_rx })
     }
 
     pub fn event_channel(&self) -> PlayerEventChannel {
@@ -93,7 +99,7 @@ impl SpotifyPlayer {
     }
 
     pub fn set_volume(&self, volume_pct: u8) -> Result<()> {
-        let vol = (volume_pct as u16).saturating_mul(655); // 0–100 → ~0–65535
+        let vol = (volume_pct as u16).saturating_mul(655);
         self.spirc.set_volume(vol).context("set_volume failed")
     }
 }

@@ -5,18 +5,20 @@ mod error;
 mod spotify;
 mod ui;
 
-use anyhow::{Context, Result, bail};
-use app::AppState;
+use anyhow::{bail, Context, Result};
+use app::{AppState, WebApiEvent};
 use config::Config;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
-use spotify::{auth::SpotifyAuth, player::SpotifyPlayer};
-use std::io;
-use std::time::Duration;
+use librespot_playback::player::PlayerEvent;
+use ratatui::{backend::CrosstermBackend, Terminal};
+use spotify::{auth::SpotifyAuth, player::SpotifyPlayer, web_api::SpotifyWebApi};
+use std::sync::Arc;
+use std::{io, time::Duration};
+use tokio::sync::mpsc;
 use tokio::time::interval;
 
 #[tokio::main]
@@ -46,6 +48,7 @@ async fn main() -> Result<()> {
         .context("Spotify authentication failed")?;
 
     let access_token = auth.access_token().await?;
+    let web_api = SpotifyWebApi::new(Arc::new(auth.client));
 
     println!("Authenticated! Connecting to Spotify...");
     let player = SpotifyPlayer::new(&config, access_token)
@@ -58,10 +61,10 @@ async fn main() -> Result<()> {
     );
     tokio::time::sleep(Duration::from_millis(800)).await;
 
-    run_tui(config, player).await
+    run_tui(config, player, web_api).await
 }
 
-async fn run_tui(config: Config, player: SpotifyPlayer) -> Result<()> {
+async fn run_tui(config: Config, player: SpotifyPlayer, web_api: SpotifyWebApi) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -74,7 +77,7 @@ async fn run_tui(config: Config, player: SpotifyPlayer) -> Result<()> {
         state.config.playback.device_name
     ));
 
-    let result = run_event_loop(&mut terminal, &mut state, player).await;
+    let result = run_event_loop(&mut terminal, &mut state, player, web_api).await;
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -87,29 +90,61 @@ async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,
     player: SpotifyPlayer,
+    web_api: SpotifyWebApi,
 ) -> Result<()> {
     let mut player_events = player.event_channel();
-    // Redraw timer — ensures the TUI ticks even when no events arrive.
+    let mut bpm_rx = player.bpm_rx.clone();
     let mut redraw_ticker = interval(Duration::from_millis(100));
+    let web_api = Arc::new(web_api);
+
+    // Background tasks send results back here.
+    let (web_tx, mut web_rx) = mpsc::channel::<WebApiEvent>(32);
 
     loop {
         tokio::select! {
-            // Librespot player event.
             event = player_events.recv() => {
                 match event {
+                    Some(PlayerEvent::TrackChanged { ref audio_item }) => {
+                        let uri = audio_item.uri.clone();
+                        let api = Arc::clone(&web_api);
+                        let tx = web_tx.clone();
+                        tokio::spawn(async move {
+                            match api.audio_features(&uri).await {
+                                Ok(f) => { let _ = tx.send(WebApiEvent::AudioFeatures {
+                                    track_uri: uri,
+                                    bpm: f.bpm,
+                                    key: f.key,
+                                    energy: f.energy,
+                                }).await; }
+                                Err(e) => eprintln!("audio_features error: {e:#}"),
+                            }
+                        });
+                        state.apply_player_event(event.unwrap());
+                    }
                     Some(ev) => state.apply_player_event(ev),
-                    None => break, // player shut down
+                    None => break,
                 }
             }
 
-            // Keyboard input (non-blocking poll).
+            result = web_rx.recv() => {
+                if let Some(ev) = result {
+                    state.apply_web_api_event(ev);
+                }
+            }
+
+            _ = bpm_rx.changed() => {
+                if let Some(bpm) = *bpm_rx.borrow() {
+                    state.active_deck_mut().bpm = Some(bpm);
+                }
+            }
+
             _ = redraw_ticker.tick() => {
                 terminal.draw(|f| ui::draw(f, state))?;
 
                 if event::poll(Duration::ZERO)? {
                     if let Event::Key(key) = event::read()? {
                         if key.kind == KeyEventKind::Press {
-                            handle_key(key.code, state, &player);
+                            handle_key(key.code, state, &player, &web_api, &web_tx);
                         }
                     }
                 }
@@ -125,7 +160,13 @@ async fn run_event_loop(
     Ok(())
 }
 
-fn handle_key(code: KeyCode, state: &mut AppState, player: &SpotifyPlayer) {
+fn handle_key(
+    code: KeyCode,
+    state: &mut AppState,
+    player: &SpotifyPlayer,
+    web_api: &Arc<SpotifyWebApi>,
+    web_tx: &mpsc::Sender<WebApiEvent>,
+) {
     use app::UiFocus;
 
     match code {
@@ -142,13 +183,18 @@ fn handle_key(code: KeyCode, state: &mut AppState, player: &SpotifyPlayer) {
     }
 
     match state.focus {
-        UiFocus::Library => handle_library_keys(code, state),
+        UiFocus::Library => handle_library_keys(code, state, web_api, web_tx),
         UiFocus::DeckA | UiFocus::DeckB => handle_deck_keys(code, state, player),
         UiFocus::Mixer => handle_mixer_keys(code, state, player),
     }
 }
 
-fn handle_library_keys(code: KeyCode, state: &mut AppState) {
+fn handle_library_keys(
+    code: KeyCode,
+    state: &mut AppState,
+    web_api: &Arc<SpotifyWebApi>,
+    web_tx: &mpsc::Sender<WebApiEvent>,
+) {
     match code {
         KeyCode::Char('/') => {
             state.library.is_searching = true;
@@ -167,10 +213,16 @@ fn handle_library_keys(code: KeyCode, state: &mut AppState) {
         }
         KeyCode::Enter if state.library.is_searching => {
             state.library.is_searching = false;
-            state.set_status(format!(
-                "Searching for \"{}\" — Web API connects in Phase 3",
-                state.library.search_query
-            ));
+            let query = state.library.search_query.clone();
+            state.set_status(format!("Searching for \"{query}\"…"));
+            let api = Arc::clone(web_api);
+            let tx = web_tx.clone();
+            tokio::spawn(async move {
+                match api.search_tracks(&query).await {
+                    Ok(results) => { let _ = tx.send(WebApiEvent::SearchResults(results)).await; }
+                    Err(e) => eprintln!("search error: {e}"),
+                }
+            });
         }
         KeyCode::Down => {
             if state.library.selected + 1 < state.library.results.len() {
@@ -181,10 +233,10 @@ fn handle_library_keys(code: KeyCode, state: &mut AppState) {
             state.library.selected = state.library.selected.saturating_sub(1);
         }
         KeyCode::Char('l') | KeyCode::Char('L') => {
-            state.set_status("Load to Deck A — search connects in Phase 3");
+            state.set_status("Load to Deck A — Phase 5");
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            state.set_status("Load to Deck B — search connects in Phase 3");
+            state.set_status("Load to Deck B — Phase 5");
         }
         _ => {}
     }

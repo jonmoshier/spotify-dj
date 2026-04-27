@@ -4,6 +4,16 @@ use librespot_playback::player::PlayerEvent;
 
 use crate::spotify::player::primary_artist;
 
+pub enum WebApiEvent {
+    AudioFeatures {
+        track_uri: String,
+        bpm: f32,
+        key: String,
+        energy: f32,
+    },
+    SearchResults(Vec<TrackSummary>),
+}
+
 /// Which panel currently has keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiFocus {
@@ -147,6 +157,24 @@ impl AppState {
             }
             // Ignore events we don't need to act on.
             _ => {}
+        }
+    }
+
+    pub fn apply_web_api_event(&mut self, event: WebApiEvent) {
+        match event {
+            WebApiEvent::AudioFeatures { track_uri, bpm, key, energy } => {
+                for deck in [&mut self.deck_a, &mut self.deck_b] {
+                    if deck.track_uri.as_deref() == Some(&track_uri) {
+                        deck.bpm = Some(bpm);
+                        deck.key = Some(key.clone());
+                        deck.energy = Some(energy);
+                    }
+                }
+            }
+            WebApiEvent::SearchResults(results) => {
+                self.library.results = results;
+                self.library.selected = 0;
+            }
         }
     }
 
