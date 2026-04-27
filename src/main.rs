@@ -5,16 +5,16 @@ mod error;
 mod spotify;
 mod ui;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use app::{AppState, CrossfadeTick, WebApiEvent};
 use config::Config;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use librespot_playback::player::PlayerEvent;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use spotify::{auth::SpotifyAuth, player::SpotifyPlayer, web_api::SpotifyWebApi};
 use std::sync::Arc;
 use std::{io, time::Duration};
@@ -220,7 +220,9 @@ fn handle_library_keys(
             let tx = web_tx.clone();
             tokio::spawn(async move {
                 match api.search_tracks(&query).await {
-                    Ok(results) => { let _ = tx.send(WebApiEvent::SearchResults(results)).await; }
+                    Ok(results) => {
+                        let _ = tx.send(WebApiEvent::SearchResults(results)).await;
+                    }
                     Err(e) => eprintln!("search error: {e}"),
                 }
             });

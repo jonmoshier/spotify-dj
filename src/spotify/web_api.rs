@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use rspotify::{
+    AuthCodePkceSpotify,
     model::{PlayableId, SearchResult, SearchType, TrackId},
     prelude::*,
-    AuthCodePkceSpotify,
 };
 use std::sync::Arc;
 
@@ -22,12 +22,7 @@ impl SpotifyWebApi {
             .with_context(|| format!("invalid track URI: {track_uri}"))?;
 
         self.client
-            .start_uris_playback(
-                [PlayableId::Track(id)],
-                Some(device_id),
-                None,
-                None,
-            )
+            .start_uris_playback([PlayableId::Track(id)], Some(device_id), None, None)
             .await
             .context("play_track request failed")?;
 
@@ -50,7 +45,11 @@ impl SpotifyWebApi {
             .into_iter()
             .filter_map(|t| {
                 let id = t.id?.to_string();
-                let artist = t.artists.first().map(|a| a.name.clone()).unwrap_or_default();
+                let artist = t
+                    .artists
+                    .first()
+                    .map(|a| a.name.clone())
+                    .unwrap_or_default();
                 Some(TrackSummary {
                     id,
                     title: t.name,
@@ -64,4 +63,3 @@ impl SpotifyWebApi {
         Ok(summaries)
     }
 }
-
