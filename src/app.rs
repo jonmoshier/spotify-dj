@@ -159,3 +159,101 @@ impl AppState {
         deck.position_ms = 0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use librespot_core::{spotify_id::SpotifyId, SpotifyUri};
+    use librespot_playback::player::PlayerEvent;
+
+    fn make_uri() -> SpotifyUri {
+        SpotifyUri::Track { id: SpotifyId { id: 1 } }
+    }
+
+    fn default_state() -> AppState {
+        AppState::new(Config::default())
+    }
+
+    #[test]
+    fn new_initializes_defaults() {
+        let state = default_state();
+        assert_eq!(state.deck_a.volume, Config::default().ui.default_volume);
+        assert_eq!(state.deck_b.volume, 0);
+        assert_eq!(state.crossfader, -1.0);
+        assert!(!state.should_quit);
+        assert!(matches!(state.focus, UiFocus::Library));
+        assert!(matches!(state.active_deck, ActiveDeck::A));
+    }
+
+    #[test]
+    fn cycle_focus_visits_all_panels() {
+        let mut state = default_state();
+        // starts at Library
+        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::DeckA));
+        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::DeckB));
+        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::Mixer));
+        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::Library));
+    }
+
+    #[test]
+    fn playing_event_sets_is_playing_and_position() {
+        let mut state = default_state();
+        state.apply_player_event(PlayerEvent::Playing {
+            play_request_id: 0,
+            track_id: make_uri(),
+            position_ms: 12_000,
+        });
+        assert!(state.deck_a.is_playing);
+        assert_eq!(state.deck_a.position_ms, 12_000);
+    }
+
+    #[test]
+    fn paused_event_clears_is_playing() {
+        let mut state = default_state();
+        state.deck_a.is_playing = true;
+        state.apply_player_event(PlayerEvent::Paused {
+            play_request_id: 0,
+            track_id: make_uri(),
+            position_ms: 5_000,
+        });
+        assert!(!state.deck_a.is_playing);
+        assert_eq!(state.deck_a.position_ms, 5_000);
+    }
+
+    #[test]
+    fn stopped_event_clears_is_playing() {
+        let mut state = default_state();
+        state.deck_a.is_playing = true;
+        state.apply_player_event(PlayerEvent::Stopped {
+            play_request_id: 0,
+            track_id: make_uri(),
+        });
+        assert!(!state.deck_a.is_playing);
+    }
+
+    #[test]
+    fn end_of_track_resets_position() {
+        let mut state = default_state();
+        state.deck_a.is_playing = true;
+        state.deck_a.position_ms = 60_000;
+        state.apply_player_event(PlayerEvent::EndOfTrack {
+            play_request_id: 0,
+            track_id: make_uri(),
+        });
+        assert!(!state.deck_a.is_playing);
+        assert_eq!(state.deck_a.position_ms, 0);
+    }
+
+    #[test]
+    fn events_target_active_deck() {
+        let mut state = default_state();
+        state.active_deck = ActiveDeck::B;
+        state.apply_player_event(PlayerEvent::Playing {
+            play_request_id: 0,
+            track_id: make_uri(),
+            position_ms: 1_000,
+        });
+        assert!(!state.deck_a.is_playing);
+        assert!(state.deck_b.is_playing);
+    }
+}

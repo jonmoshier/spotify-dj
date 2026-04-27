@@ -88,3 +88,34 @@ impl Config {
         Ok(proj.config_dir().to_path_buf())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_values() {
+        let config = Config::default();
+        assert!(config.auth.client_id.is_empty());
+        assert_eq!(config.playback.device_name, "spotify-dj");
+        assert_eq!(config.playback.bitrate, 320);
+        assert_eq!(config.ui.default_volume, 80);
+        assert_eq!(config.ui.crossfade_duration_secs, 10);
+    }
+
+    #[test]
+    fn toml_round_trip() {
+        let original = Config {
+            auth: AuthConfig { client_id: "abc123".to_string() },
+            playback: PlaybackConfig { device_name: "my-dj".to_string(), bitrate: 160 },
+            ui: UiConfig { crossfade_duration_secs: 5, default_volume: 60 },
+        };
+        let serialized = toml::to_string_pretty(&original).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.auth.client_id, "abc123");
+        assert_eq!(deserialized.playback.device_name, "my-dj");
+        assert_eq!(deserialized.playback.bitrate, 160);
+        assert_eq!(deserialized.ui.crossfade_duration_secs, 5);
+        assert_eq!(deserialized.ui.default_volume, 60);
+    }
+}
