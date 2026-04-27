@@ -8,6 +8,10 @@ anyhow = "1.0.102"
 chrono = "0.4.44"
 crossterm = "0.29.0"
 directories = "6.0.0"
+librespot-connect = "0.8.0"
+librespot-core = "0.8.0"
+librespot-metadata = "0.8.0"
+librespot-playback = "0.8.0"
 ratatui = "0.30.0"
 rspotify = { version = "0.16.1", features = ["client-reqwest"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -17,3 +21,6 @@ tokio = { version = "1.52.1", features = ["full"] }
 toml = "1.1.2"
 url = "2.5.8"
 webbrowser = "1.2.1"
+
+[patch.crates-io]
+vergen-gitcl = { path = "patches/vergen-gitcl" }

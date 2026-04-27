@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, LineGauge, Paragraph},
-    Frame,
 };
 
 pub fn draw_mixer(
@@ -12,7 +12,11 @@ pub fn draw_mixer(
     crossfader: f32,
     is_focused: bool,
 ) {
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     let outer = Block::default()
         .borders(Borders::ALL)

@@ -4,10 +4,10 @@ pub mod mixer;
 
 use crate::app::{AppState, UiFocus};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 pub fn draw(frame: &mut Frame, state: &AppState) {
@@ -49,14 +49,24 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(rows[1]);
 
-    library::draw_library(frame, bottom_cols[0], &state.library, state.focus == UiFocus::Library);
+    library::draw_library(
+        frame,
+        bottom_cols[0],
+        &state.library,
+        state.focus == UiFocus::Library,
+    );
 
     let mixer_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(6), Constraint::Length(3)])
         .split(bottom_cols[1]);
 
-    mixer::draw_mixer(frame, mixer_rows[0], state.crossfader, state.focus == UiFocus::Mixer);
+    mixer::draw_mixer(
+        frame,
+        mixer_rows[0],
+        state.crossfader,
+        state.focus == UiFocus::Mixer,
+    );
     draw_status(frame, mixer_rows[1], state);
 }
 

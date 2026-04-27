@@ -1,10 +1,10 @@
 use crate::app::LibraryState;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 pub fn draw_library(
@@ -13,7 +13,11 @@ pub fn draw_library(
     library: &LibraryState,
     is_focused: bool,
 ) {
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     let outer = Block::default()
         .borders(Borders::ALL)
@@ -59,10 +63,7 @@ pub fn draw_library(
             .map(|t| {
                 let bpm = t.bpm.map(|b| format!("{b:.0}")).unwrap_or_default();
                 let label = format!("{} — {}", t.title, t.artist);
-                let bpm_span = Span::styled(
-                    format!(" {bpm}"),
-                    Style::default().fg(Color::Yellow),
-                );
+                let bpm_span = Span::styled(format!(" {bpm}"), Style::default().fg(Color::Yellow));
                 ListItem::new(Line::from(vec![Span::raw(label), bpm_span]))
             })
             .collect()

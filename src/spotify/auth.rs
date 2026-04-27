@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use rspotify::{
-    model::Token,
-    prelude::*,
-    scopes, AuthCodePkceSpotify, Config as SpotifyConfig, Credentials, OAuth,
+    AuthCodePkceSpotify, Config as SpotifyConfig, Credentials, OAuth, model::Token, prelude::*,
+    scopes,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -190,5 +189,12 @@ impl SpotifyAuth {
 
     pub fn clear_tokens(&self) {
         fs::remove_file(&self.token_path).ok();
+    }
+
+    /// Extract the current access token for use with librespot.
+    pub async fn access_token(&self) -> Result<String> {
+        let locked = self.client.token.lock().await.unwrap();
+        let token = locked.as_ref().context("not authenticated")?;
+        Ok(token.access_token.clone())
     }
 }

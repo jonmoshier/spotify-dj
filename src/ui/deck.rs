@@ -1,11 +1,11 @@
 use crate::app::DeckState;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, LineGauge, Paragraph},
-    Frame,
 };
 use std::time::Duration;
 
@@ -60,10 +60,7 @@ pub fn draw_deck(
             title_text,
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            artist_text,
-            Style::default().fg(Color::Gray),
-        )),
+        Line::from(Span::styled(artist_text, Style::default().fg(Color::Gray))),
     ]);
     frame.render_widget(track_info, rows[0]);
 
@@ -78,15 +75,18 @@ pub fn draw_deck(
         .ratio(progress.clamp(0.0, 1.0))
         .filled_symbol(symbols::line::THICK.horizontal)
         .unfilled_symbol(symbols::line::NORMAL.horizontal)
-        .filled_style(Style::default().fg(if is_active { Color::Green } else { Color::DarkGray }));
+        .filled_style(Style::default().fg(if is_active {
+            Color::Green
+        } else {
+            Color::DarkGray
+        }));
     frame.render_widget(progress_bar, rows[1]);
 
     // Time labels
     let pos = format_duration(deck.position_ms);
     let dur = format_duration(deck.duration_ms);
-    let time_line =
-        Paragraph::new(format!("{status_indicator} {pos} / {dur}"))
-            .style(Style::default().fg(Color::Gray));
+    let time_line = Paragraph::new(format!("{status_indicator} {pos} / {dur}"))
+        .style(Style::default().fg(Color::Gray));
     frame.render_widget(time_line, rows[2]);
 
     // BPM / Key / Energy
@@ -94,10 +94,7 @@ pub fn draw_deck(
         .bpm
         .map(|b| format!("{b:.1} BPM"))
         .unwrap_or_else(|| "--- BPM".to_string());
-    let key_str = deck
-        .key
-        .as_deref()
-        .unwrap_or("---");
+    let key_str = deck.key.as_deref().unwrap_or("---");
     let energy_str = deck
         .energy
         .map(|e| format!("Energy: {:.0}%", e * 100.0))
@@ -113,8 +110,12 @@ pub fn draw_deck(
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(rows[4]);
 
-    let placeholder = Paragraph::new("▁▂▃▄▅▄▃▂▁ ▂▃▅▆▅▃▂ ▁▂▃▄▅▄▂▁")
-        .style(Style::default().fg(if is_active { Color::Cyan } else { Color::DarkGray }));
+    let placeholder =
+        Paragraph::new("▁▂▃▄▅▄▃▂▁ ▂▃▅▆▅▃▂ ▁▂▃▄▅▄▂▁").style(Style::default().fg(if is_active {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        }));
     frame.render_widget(placeholder, viz_rows[0]);
 
     let vol_gauge = Gauge::default()
