@@ -53,6 +53,9 @@ pub struct DeckState {
     pub duration_ms: u32,
     pub position_ms: u32,
     pub is_playing: bool,
+    /// True when a track was loaded via L/R but play_track hasn't been called yet.
+    /// False once librespot owns the track (either we started it or it came from the phone).
+    pub needs_initial_play: bool,
     pub bpm: Option<f32>,
     pub key: Option<String>,
     pub energy: Option<f32>,
@@ -160,6 +163,7 @@ impl AppState {
         d.key = None;
         d.energy = None;
         d.is_playing = false;
+        d.needs_initial_play = true;
     }
 
     pub fn swap_active_deck(&mut self) {
@@ -309,6 +313,7 @@ impl AppState {
         deck.track_artist = Some(primary_artist(&item));
         deck.duration_ms = item.duration_ms;
         deck.position_ms = 0;
+        deck.needs_initial_play = false; // librespot owns this track
     }
 }
 

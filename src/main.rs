@@ -263,22 +263,21 @@ fn handle_deck_keys(
 ) {
     match code {
         KeyCode::Char(' ') => {
-            if state.active_deck_state().is_playing {
-                // Already playing — toggle pause via spirc
-                if let Err(e) = player.play_pause() {
-                    state.set_status(format!("play_pause error: {e}"));
+            let deck = state.active_deck_state();
+            if deck.needs_initial_play {
+                if let Some(uri) = deck.track_uri.clone() {
+                    // Track loaded via L/R but never started — send to Spotify
+                    state.active_deck_mut().needs_initial_play = false;
+                    let api = Arc::clone(web_api);
+                    let device_id = player.device_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = api.play_track(&uri, &device_id).await {
+                            eprintln!("play_track error: {e:#}");
+                        }
+                    });
                 }
-            } else if let Some(uri) = state.active_deck_state().track_uri.clone() {
-                // Track loaded but not playing — start it via Web API
-                let api = Arc::clone(web_api);
-                let device_id = player.device_id.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = api.play_track(&uri, &device_id).await {
-                        eprintln!("play_track error: {e:#}");
-                    }
-                });
             } else {
-                // Nothing loaded — fall back to spirc toggle
+                // librespot owns the track — toggle play/pause
                 if let Err(e) = player.play_pause() {
                     state.set_status(format!("play_pause error: {e}"));
                 }
