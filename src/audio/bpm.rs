@@ -55,8 +55,8 @@ impl BpmDetector {
                     let window_time = sample_clock / SAMPLE_RATE;
 
                     // RMS² energy of this window
-                    let energy = mono_buf.iter().map(|s| s * s).sum::<f32>()
-                        / WINDOW_SAMPLES as f32;
+                    let energy =
+                        mono_buf.iter().map(|s| s * s).sum::<f32>() / WINDOW_SAMPLES as f32;
 
                     energy_history.push_back(energy);
                     if energy_history.len() > HISTORY_SIZE {

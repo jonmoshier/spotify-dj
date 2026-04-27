@@ -4,13 +4,22 @@ use librespot_playback::player::PlayerEvent;
 
 use crate::spotify::player::primary_artist;
 
+pub enum CrossfadeTick {
+    Continue,
+    PlayTrack(String), // URI to start playing on the incoming deck
+    Complete,
+}
+
+pub struct CrossfadeState {
+    pub total_ms: u32,
+    pub elapsed_ms: u32,
+    pub midpoint_fired: bool,
+    pub cued_uri: String,
+    pub start_volume: u8,  // active deck volume at fade start
+    pub target_volume: u8, // incoming deck volume at fade end
+}
+
 pub enum WebApiEvent {
-    AudioFeatures {
-        track_uri: String,
-        bpm: f32,
-        key: String,
-        energy: f32,
-    },
     SearchResults(Vec<TrackSummary>),
 }
 
@@ -44,6 +53,9 @@ pub struct DeckState {
     pub duration_ms: u32,
     pub position_ms: u32,
     pub is_playing: bool,
+    /// True when a track was loaded via L/R but play_track hasn't been called yet.
+    /// False once librespot owns the track (either we started it or it came from the phone).
+    pub needs_initial_play: bool,
     pub bpm: Option<f32>,
     pub key: Option<String>,
     pub energy: Option<f32>,
@@ -74,6 +86,7 @@ pub struct AppState {
     pub deck_b: DeckState,
     pub active_deck: ActiveDeck,
     pub crossfader: f32, // -1.0 = full A, 1.0 = full B
+    pub crossfade: Option<CrossfadeState>,
     pub library: LibraryState,
     pub focus: UiFocus,
     pub should_quit: bool,
@@ -94,6 +107,7 @@ impl AppState {
             deck_b,
             active_deck: ActiveDeck::A,
             crossfader: -1.0,
+            crossfade: None,
             library: LibraryState::default(),
             focus: UiFocus::Library,
             should_quit: false,
@@ -117,6 +131,129 @@ impl AppState {
             ActiveDeck::A => &self.deck_a,
             ActiveDeck::B => &self.deck_b,
         }
+    }
+
+    pub fn inactive_deck_mut(&mut self) -> &mut DeckState {
+        match self.active_deck {
+            ActiveDeck::A => &mut self.deck_b,
+            ActiveDeck::B => &mut self.deck_a,
+        }
+    }
+
+    pub fn inactive_deck_state(&self) -> &DeckState {
+        match self.active_deck {
+            ActiveDeck::A => &self.deck_b,
+            ActiveDeck::B => &self.deck_a,
+        }
+    }
+
+    /// Load a library track's metadata onto the specified deck (no audio starts).
+    pub fn load_to_deck(&mut self, track: &TrackSummary, deck: ActiveDeck) {
+        let uri = track.id.clone(); // already a full spotify:track:XXX URI from rspotify
+        let d = match deck {
+            ActiveDeck::A => &mut self.deck_a,
+            ActiveDeck::B => &mut self.deck_b,
+        };
+        d.track_uri = Some(uri);
+        d.track_title = Some(track.title.clone());
+        d.track_artist = Some(track.artist.clone());
+        d.duration_ms = track.duration_ms;
+        d.position_ms = 0;
+        d.bpm = track.bpm;
+        d.key = None;
+        d.energy = None;
+        d.is_playing = false;
+        d.needs_initial_play = true;
+    }
+
+    pub fn swap_active_deck(&mut self) {
+        self.active_deck = match self.active_deck {
+            ActiveDeck::A => ActiveDeck::B,
+            ActiveDeck::B => ActiveDeck::A,
+        };
+    }
+
+    /// Begin a crossfade to the inactive deck. Returns `None` if the inactive deck has no track.
+    pub fn start_crossfade(&mut self, duration_secs: u64) -> bool {
+        let Some(uri) = self.inactive_deck_state().track_uri.clone() else {
+            return false;
+        };
+        let start_volume = self.active_deck_state().volume;
+        let target_volume = self.config.ui.default_volume;
+        self.crossfade = Some(CrossfadeState {
+            total_ms: (duration_secs as u32).saturating_mul(1000),
+            elapsed_ms: 0,
+            midpoint_fired: false,
+            cued_uri: uri,
+            start_volume,
+            target_volume,
+        });
+        true
+    }
+
+    /// Advance the crossfade by `delta_ms`. Called from the 100ms redraw tick.
+    pub fn tick_crossfade(&mut self, delta_ms: u32) -> CrossfadeTick {
+        let (total_ms, elapsed, midpoint_fired, start_vol, target_vol, cued_uri) =
+            match self.crossfade.as_ref() {
+                None => return CrossfadeTick::Continue,
+                Some(cf) => (
+                    cf.total_ms,
+                    cf.elapsed_ms,
+                    cf.midpoint_fired,
+                    cf.start_volume,
+                    cf.target_volume,
+                    cf.cued_uri.clone(),
+                ),
+            };
+
+        let new_elapsed = (elapsed + delta_ms).min(total_ms);
+        let progress = new_elapsed as f32 / total_ms as f32;
+
+        // Volume ramp: active fades out, incoming fades in
+        let active_vol = (start_vol as f32 * (1.0 - progress)).round() as u8;
+        let incoming_vol = (target_vol as f32 * progress).round() as u8;
+        self.active_deck_mut().volume = active_vol;
+        self.inactive_deck_mut().volume = incoming_vol;
+
+        // Crossfader tracks the fade
+        self.crossfader = match self.active_deck {
+            ActiveDeck::A => -1.0 + 2.0 * progress,
+            ActiveDeck::B => 1.0 - 2.0 * progress,
+        };
+
+        if let Some(cf) = self.crossfade.as_mut() {
+            cf.elapsed_ms = new_elapsed;
+        }
+
+        if !midpoint_fired && progress >= 0.5 {
+            if let Some(cf) = self.crossfade.as_mut() {
+                cf.midpoint_fired = true;
+            }
+            return CrossfadeTick::PlayTrack(cued_uri);
+        }
+
+        if progress >= 1.0 {
+            CrossfadeTick::Complete
+        } else {
+            CrossfadeTick::Continue
+        }
+    }
+
+    /// Complete the crossfade: swap decks, reset volumes, clear state.
+    pub fn finish_crossfade(&mut self) {
+        let target_volume = self
+            .crossfade
+            .as_ref()
+            .map(|cf| cf.target_volume)
+            .unwrap_or(self.config.ui.default_volume);
+        self.crossfade = None;
+        self.swap_active_deck();
+        self.active_deck_mut().volume = target_volume;
+        self.inactive_deck_mut().volume = 0;
+        self.crossfader = match self.active_deck {
+            ActiveDeck::A => -1.0,
+            ActiveDeck::B => 1.0,
+        };
     }
 
     pub fn cycle_focus(&mut self) {
@@ -162,15 +299,6 @@ impl AppState {
 
     pub fn apply_web_api_event(&mut self, event: WebApiEvent) {
         match event {
-            WebApiEvent::AudioFeatures { track_uri, bpm, key, energy } => {
-                for deck in [&mut self.deck_a, &mut self.deck_b] {
-                    if deck.track_uri.as_deref() == Some(&track_uri) {
-                        deck.bpm = Some(bpm);
-                        deck.key = Some(key.clone());
-                        deck.energy = Some(energy);
-                    }
-                }
-            }
             WebApiEvent::SearchResults(results) => {
                 self.library.results = results;
                 self.library.selected = 0;
@@ -185,6 +313,7 @@ impl AppState {
         deck.track_artist = Some(primary_artist(&item));
         deck.duration_ms = item.duration_ms;
         deck.position_ms = 0;
+        deck.needs_initial_play = false; // librespot owns this track
     }
 }
 

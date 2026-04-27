@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::{
+    Session,
     authentication::Credentials,
     config::{DeviceType, SessionConfig},
-    Session,
 };
 use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::{
     audio_backend,
     config::{AudioFormat, Bitrate, PlayerConfig},
-    mixer::{softmixer::SoftMixer, Mixer, MixerConfig},
+    mixer::{Mixer, MixerConfig, softmixer::SoftMixer},
     player::{Player, PlayerEventChannel},
 };
 use std::{sync::Arc, time::Duration};
@@ -23,12 +23,14 @@ pub struct SpotifyPlayer {
     pub player: Arc<Player>,
     pub session: Session,
     pub bpm_rx: watch::Receiver<Option<f32>>,
+    pub device_id: String,
 }
 
 impl SpotifyPlayer {
     pub async fn new(config: &Config, access_token: String) -> Result<Self> {
+        let device_id = format!("spotify-dj-{}", &config.playback.device_name);
         let session_config = SessionConfig {
-            device_id: format!("spotify-dj-{}", &config.playback.device_name),
+            device_id: device_id.clone(),
             ..Default::default()
         };
 
@@ -81,7 +83,13 @@ impl SpotifyPlayer {
 
         tokio::spawn(spirc_task);
 
-        Ok(Self { spirc, player, session, bpm_rx })
+        Ok(Self {
+            spirc,
+            player,
+            session,
+            bpm_rx,
+            device_id,
+        })
     }
 
     pub fn event_channel(&self) -> PlayerEventChannel {

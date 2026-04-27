@@ -5,16 +5,16 @@ mod error;
 mod spotify;
 mod ui;
 
-use anyhow::{bail, Context, Result};
-use app::{AppState, WebApiEvent};
+use anyhow::{Context, Result, bail};
+use app::{AppState, CrossfadeTick, WebApiEvent};
 use config::Config;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use librespot_playback::player::PlayerEvent;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use spotify::{auth::SpotifyAuth, player::SpotifyPlayer, web_api::SpotifyWebApi};
 use std::sync::Arc;
 use std::{io, time::Duration};
@@ -104,21 +104,7 @@ async fn run_event_loop(
         tokio::select! {
             event = player_events.recv() => {
                 match event {
-                    Some(PlayerEvent::TrackChanged { ref audio_item }) => {
-                        let uri = audio_item.uri.clone();
-                        let api = Arc::clone(&web_api);
-                        let tx = web_tx.clone();
-                        tokio::spawn(async move {
-                            match api.audio_features(&uri).await {
-                                Ok(f) => { let _ = tx.send(WebApiEvent::AudioFeatures {
-                                    track_uri: uri,
-                                    bpm: f.bpm,
-                                    key: f.key,
-                                    energy: f.energy,
-                                }).await; }
-                                Err(e) => eprintln!("audio_features error: {e:#}"),
-                            }
-                        });
+                    Some(PlayerEvent::TrackChanged { .. }) => {
                         state.apply_player_event(event.unwrap());
                     }
                     Some(ev) => state.apply_player_event(ev),
@@ -139,6 +125,21 @@ async fn run_event_loop(
             }
 
             _ = redraw_ticker.tick() => {
+                // Advance crossfade state machine
+                match state.tick_crossfade(100) {
+                    CrossfadeTick::PlayTrack(uri) => {
+                        let api = Arc::clone(&web_api);
+                        let device_id = player.device_id.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = api.play_track(&uri, &device_id).await {
+                                eprintln!("crossfade play_track error: {e:#}");
+                            }
+                        });
+                    }
+                    CrossfadeTick::Complete => state.finish_crossfade(),
+                    CrossfadeTick::Continue => {}
+                }
+
                 terminal.draw(|f| ui::draw(f, state))?;
 
                 if event::poll(Duration::ZERO)? {
@@ -184,7 +185,7 @@ fn handle_key(
 
     match state.focus {
         UiFocus::Library => handle_library_keys(code, state, web_api, web_tx),
-        UiFocus::DeckA | UiFocus::DeckB => handle_deck_keys(code, state, player),
+        UiFocus::DeckA | UiFocus::DeckB => handle_deck_keys(code, state, player, web_api),
         UiFocus::Mixer => handle_mixer_keys(code, state, player),
     }
 }
@@ -219,7 +220,9 @@ fn handle_library_keys(
             let tx = web_tx.clone();
             tokio::spawn(async move {
                 match api.search_tracks(&query).await {
-                    Ok(results) => { let _ = tx.send(WebApiEvent::SearchResults(results)).await; }
+                    Ok(results) => {
+                        let _ = tx.send(WebApiEvent::SearchResults(results)).await;
+                    }
                     Err(e) => eprintln!("search error: {e}"),
                 }
             });
@@ -233,20 +236,53 @@ fn handle_library_keys(
             state.library.selected = state.library.selected.saturating_sub(1);
         }
         KeyCode::Char('l') | KeyCode::Char('L') => {
-            state.set_status("Load to Deck A — Phase 5");
+            if let Some(track) = state.library.results.get(state.library.selected).cloned() {
+                let title = track.title.clone();
+                state.load_to_deck(&track, app::ActiveDeck::A);
+                state.set_status(format!("Loaded \"{title}\" → Deck A"));
+            } else {
+                state.set_status("No track selected");
+            }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            state.set_status("Load to Deck B — Phase 5");
+            if let Some(track) = state.library.results.get(state.library.selected).cloned() {
+                let title = track.title.clone();
+                state.load_to_deck(&track, app::ActiveDeck::B);
+                state.set_status(format!("Loaded \"{title}\" → Deck B"));
+            } else {
+                state.set_status("No track selected");
+            }
         }
         _ => {}
     }
 }
 
-fn handle_deck_keys(code: KeyCode, state: &mut AppState, player: &SpotifyPlayer) {
+fn handle_deck_keys(
+    code: KeyCode,
+    state: &mut AppState,
+    player: &SpotifyPlayer,
+    web_api: &Arc<SpotifyWebApi>,
+) {
     match code {
         KeyCode::Char(' ') => {
-            if let Err(e) = player.play_pause() {
-                state.set_status(format!("play_pause error: {e}"));
+            let deck = state.active_deck_state();
+            if deck.needs_initial_play {
+                if let Some(uri) = deck.track_uri.clone() {
+                    // Track loaded via L/R but never started — send to Spotify
+                    state.active_deck_mut().needs_initial_play = false;
+                    let api = Arc::clone(web_api);
+                    let device_id = player.device_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = api.play_track(&uri, &device_id).await {
+                            eprintln!("play_track error: {e:#}");
+                        }
+                    });
+                }
+            } else {
+                // librespot owns the track — toggle play/pause
+                if let Err(e) = player.play_pause() {
+                    state.set_status(format!("play_pause error: {e}"));
+                }
             }
         }
         KeyCode::Left => {
@@ -288,7 +324,15 @@ fn handle_mixer_keys(code: KeyCode, state: &mut AppState, _player: &SpotifyPlaye
             state.crossfader = (state.crossfader + 0.1).min(1.0);
         }
         KeyCode::Char('x') | KeyCode::Char('X') => {
-            state.set_status("Auto-crossfade — Phase 5");
+            if state.crossfade.is_some() {
+                state.set_status("Crossfade already in progress");
+            } else if state.inactive_deck_state().track_uri.is_none() {
+                state.set_status("Load a track to the other deck first ([/] search, then [L]/[R])");
+            } else {
+                let secs = state.config.ui.crossfade_duration_secs;
+                state.start_crossfade(secs);
+                state.set_status(format!("Crossfading over {secs}s…"));
+            }
         }
         KeyCode::Char('5') => {
             state.config.ui.crossfade_duration_secs = 5;
