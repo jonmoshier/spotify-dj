@@ -23,12 +23,14 @@ pub struct SpotifyPlayer {
     pub player: Arc<Player>,
     pub session: Session,
     pub bpm_rx: watch::Receiver<Option<f32>>,
+    pub device_id: String,
 }
 
 impl SpotifyPlayer {
     pub async fn new(config: &Config, access_token: String) -> Result<Self> {
+        let device_id = format!("spotify-dj-{}", &config.playback.device_name);
         let session_config = SessionConfig {
-            device_id: format!("spotify-dj-{}", &config.playback.device_name),
+            device_id: device_id.clone(),
             ..Default::default()
         };
 
@@ -81,7 +83,7 @@ impl SpotifyPlayer {
 
         tokio::spawn(spirc_task);
 
-        Ok(Self { spirc, player, session, bpm_rx })
+        Ok(Self { spirc, player, session, bpm_rx, device_id })
     }
 
     pub fn event_channel(&self) -> PlayerEventChannel {
