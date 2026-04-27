@@ -148,10 +148,7 @@ fn draw_help(frame: &mut Frame) {
                 ))
             } else {
                 Line::from(vec![
-                    Span::styled(
-                        format!("{:<20}", key),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled(format!("{:<20}", key), Style::default().fg(Color::Cyan)),
                     Span::raw(*desc),
                 ])
             }

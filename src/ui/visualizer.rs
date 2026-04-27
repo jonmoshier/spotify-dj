@@ -53,8 +53,7 @@ impl Widget for Visualizer<'_> {
         let total_eighths = area.height as u32 * 8;
 
         for x in 0..area.width {
-            let band_idx =
-                ((x as usize * band_count) / area.width as usize).min(band_count - 1);
+            let band_idx = ((x as usize * band_count) / area.width as usize).min(band_count - 1);
             let value = self.bands[band_idx].clamp(0.0, 1.0);
             let fill_eighths = (value * total_eighths as f32).round() as u32;
 

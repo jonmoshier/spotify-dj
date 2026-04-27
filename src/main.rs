@@ -10,17 +10,17 @@ use app::{AppState, CrossfadeTick, WebApiEvent};
 use config::Config;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind,
-        MouseButton, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use std::thread;
 use librespot_playback::player::PlayerEvent;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use spotify::{auth::SpotifyAuth, player::SpotifyPlayer, web_api::SpotifyWebApi};
 use std::sync::Arc;
+use std::thread;
 use std::{io, time::Duration};
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -84,7 +84,11 @@ async fn run_tui(config: Config, player: SpotifyPlayer, web_api: SpotifyWebApi) 
     let result = run_event_loop(&mut terminal, &mut state, player, web_api).await;
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
