@@ -2,6 +2,8 @@
 
 A Traktor-style terminal DJ app for Spotify. Dual decks, crossfader, BPM/key display, and a real-time frequency visualizer — all in your terminal.
 
+![](screengrab.png)
+
 **Requires Spotify Premium.**
 
 ## Setup
@@ -55,10 +57,10 @@ Your browser will open for Spotify login on first run. Tokens are saved to `~/.c
 ## Implementation Status
 
 - [x] Phase 1: TUI skeleton + OAuth2 auth
-- [ ] Phase 2: librespot playback core
-- [ ] Phase 3: Spotify Web API (search, audio features)
+- [x] Phase 2: librespot playback core
+- [x] Phase 3: Spotify Web API (search, audio features)
 - [ ] Phase 4: Real-time FFT visualizer
-- [ ] Phase 5: Dual deck + crossfade
+- [x] Phase 5: Dual deck + crossfade
 - [ ] Phase 6: Polish
 
 ## Notes
