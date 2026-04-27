@@ -11,6 +11,7 @@ pub fn draw_mixer(
     area: ratatui::layout::Rect,
     crossfader: f32,
     is_focused: bool,
+    auto_fade: bool,
 ) {
     let border_color = if is_focused {
         Color::Cyan
@@ -18,9 +19,15 @@ pub fn draw_mixer(
         Color::DarkGray
     };
 
+    let title = if auto_fade {
+        " Mixer  [AUTO] "
+    } else {
+        " Mixer "
+    };
+
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title(" Mixer ")
+        .title(title)
         .border_style(Style::default().fg(border_color));
 
     let inner = outer.inner(area);
@@ -52,7 +59,7 @@ pub fn draw_mixer(
     frame.render_widget(xfader, rows[1]);
 
     // Crossfade hints
-    let hints = Paragraph::new("[←] Fade to A    [X] Auto-fade    [→] Fade to B")
+    let hints = Paragraph::new("[←] Fade to A    [X] Crossfade now    [A] Auto    [→] Fade to B")
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, rows[2]);
 

@@ -93,6 +93,11 @@ pub struct AppState {
     pub status_message: Option<String>,
     /// Latest FFT band magnitudes (0..1) from the active audio stream.
     pub fft_bands: Vec<f32>,
+    /// When true, automatically start a crossfade as the active track nears its end.
+    pub auto_fade: bool,
+    /// URI of the last track auto-fade fired on. Prevents re-firing on the same track
+    /// (e.g. after the position briefly oscillates near the end).
+    pub auto_fade_last_fired_uri: Option<String>,
 }
 
 impl AppState {
@@ -115,6 +120,8 @@ impl AppState {
             should_quit: false,
             status_message: None,
             fft_bands: Vec::new(),
+            auto_fade: false,
+            auto_fade_last_fired_uri: None,
         }
     }
 
@@ -192,6 +199,35 @@ impl AppState {
             target_volume,
         });
         true
+    }
+
+    /// If auto-fade is enabled, the active track is playing, and its remaining
+    /// time is within the configured fade duration, start a crossfade. Returns
+    /// `true` if a fade was started this call. Fires at most once per active
+    /// track URI to prevent re-firing as `position_ms` oscillates near the end.
+    pub fn maybe_auto_fade(&mut self) -> bool {
+        if !self.auto_fade || self.crossfade.is_some() {
+            return false;
+        }
+        let active = self.active_deck_state();
+        if !active.is_playing || active.duration_ms == 0 {
+            return false;
+        }
+        let Some(active_uri) = active.track_uri.clone() else {
+            return false;
+        };
+        if self.auto_fade_last_fired_uri.as_ref() == Some(&active_uri) {
+            return false;
+        }
+        if self.inactive_deck_state().track_uri.is_none() {
+            return false;
+        }
+        let fade_ms = (self.config.ui.crossfade_duration_secs as u32).saturating_mul(1000);
+        if active.duration_ms.saturating_sub(active.position_ms) > fade_ms {
+            return false;
+        }
+        self.auto_fade_last_fired_uri = Some(active_uri);
+        self.start_crossfade(self.config.ui.crossfade_duration_secs)
     }
 
     /// Advance the crossfade by `delta_ms`. Called from the 100ms redraw tick.
@@ -421,5 +457,77 @@ mod tests {
         });
         assert!(!state.deck_a.is_playing);
         assert!(state.deck_b.is_playing);
+    }
+
+    /// Set up a state primed for auto-fade: deck A playing near end, deck B cued.
+    fn primed_for_auto_fade() -> AppState {
+        let mut state = default_state();
+        state.auto_fade = true;
+        state.config.ui.crossfade_duration_secs = 5;
+        state.deck_a.track_uri = Some("spotify:track:A".into());
+        state.deck_a.is_playing = true;
+        state.deck_a.duration_ms = 200_000;
+        state.deck_a.position_ms = 197_000; // 3s remaining < 5s fade
+        state.deck_b.track_uri = Some("spotify:track:B".into());
+        state
+    }
+
+    #[test]
+    fn auto_fade_fires_when_track_near_end() {
+        let mut state = primed_for_auto_fade();
+        assert!(state.maybe_auto_fade());
+        assert!(state.crossfade.is_some());
+        assert_eq!(
+            state.auto_fade_last_fired_uri.as_deref(),
+            Some("spotify:track:A")
+        );
+    }
+
+    #[test]
+    fn auto_fade_skips_when_disabled() {
+        let mut state = primed_for_auto_fade();
+        state.auto_fade = false;
+        assert!(!state.maybe_auto_fade());
+        assert!(state.crossfade.is_none());
+    }
+
+    #[test]
+    fn auto_fade_skips_when_far_from_end() {
+        let mut state = primed_for_auto_fade();
+        state.deck_a.position_ms = 10_000; // 190s remaining
+        assert!(!state.maybe_auto_fade());
+    }
+
+    #[test]
+    fn auto_fade_skips_when_inactive_deck_empty() {
+        let mut state = primed_for_auto_fade();
+        state.deck_b.track_uri = None;
+        assert!(!state.maybe_auto_fade());
+    }
+
+    #[test]
+    fn auto_fade_skips_when_paused() {
+        let mut state = primed_for_auto_fade();
+        state.deck_a.is_playing = false;
+        assert!(!state.maybe_auto_fade());
+    }
+
+    #[test]
+    fn auto_fade_fires_at_most_once_per_track() {
+        let mut state = primed_for_auto_fade();
+        assert!(state.maybe_auto_fade());
+        // Cancel the fade and try again with the same active URI — should not refire.
+        state.crossfade = None;
+        assert!(!state.maybe_auto_fade());
+    }
+
+    #[test]
+    fn auto_fade_rearms_after_track_change() {
+        let mut state = primed_for_auto_fade();
+        assert!(state.maybe_auto_fade());
+        state.crossfade = None;
+        // New track loaded onto active deck.
+        state.deck_a.track_uri = Some("spotify:track:C".into());
+        assert!(state.maybe_auto_fade());
     }
 }

@@ -130,6 +130,12 @@ async fn run_event_loop(
             }
 
             _ = redraw_ticker.tick() => {
+                // Auto-fade kicks in just before the track ends, if enabled.
+                if state.maybe_auto_fade() {
+                    let secs = state.config.ui.crossfade_duration_secs;
+                    state.set_status(format!("Auto-fading over {secs}s…"));
+                }
+
                 // Advance crossfade state machine
                 match state.tick_crossfade(100) {
                     CrossfadeTick::PlayTrack(uri) => {
@@ -183,6 +189,20 @@ fn handle_key(
         KeyCode::Tab => {
             state.cycle_focus();
             state.status_message = None;
+            return;
+        }
+        KeyCode::Char('a') | KeyCode::Char('A')
+            if !matches!(state.focus, UiFocus::Library) || !state.library.is_searching =>
+        {
+            state.auto_fade = !state.auto_fade;
+            // Rearm: a fresh toggle should re-evaluate the current track.
+            state.auto_fade_last_fired_uri = None;
+            let secs = state.config.ui.crossfade_duration_secs;
+            state.set_status(if state.auto_fade {
+                format!("Auto-fade ON — fade starts {secs}s before track end")
+            } else {
+                "Auto-fade OFF".into()
+            });
             return;
         }
         _ => {}
