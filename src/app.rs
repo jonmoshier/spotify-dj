@@ -91,6 +91,8 @@ pub struct AppState {
     pub focus: UiFocus,
     pub should_quit: bool,
     pub status_message: Option<String>,
+    /// Latest FFT band magnitudes (0..1) from the active audio stream.
+    pub fft_bands: Vec<f32>,
 }
 
 impl AppState {
@@ -112,6 +114,7 @@ impl AppState {
             focus: UiFocus::Library,
             should_quit: false,
             status_message: None,
+            fft_bands: Vec::new(),
         }
     }
 

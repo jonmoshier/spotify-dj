@@ -1,6 +1,7 @@
 pub mod deck;
 pub mod library;
 pub mod mixer;
+pub mod visualizer;
 
 use crate::app::{AppState, UiFocus};
 use ratatui::{
@@ -32,6 +33,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         "A",
         state.active_deck == crate::app::ActiveDeck::A,
         state.focus == UiFocus::DeckA,
+        &state.fft_bands,
     );
 
     deck::draw_deck(
@@ -41,6 +43,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         "B",
         state.active_deck == crate::app::ActiveDeck::B,
         state.focus == UiFocus::DeckB,
+        &state.fft_bands,
     );
 
     // Bottom row: library (30%) | mixer + status (70%)

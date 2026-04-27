@@ -94,6 +94,7 @@ async fn run_event_loop(
 ) -> Result<()> {
     let mut player_events = player.event_channel();
     let mut bpm_rx = player.bpm_rx.clone();
+    let mut bands_rx = player.bands_rx.clone();
     let mut redraw_ticker = interval(Duration::from_millis(100));
     let web_api = Arc::new(web_api);
 
@@ -122,6 +123,10 @@ async fn run_event_loop(
                 if let Some(bpm) = *bpm_rx.borrow() {
                     state.active_deck_mut().bpm = Some(bpm);
                 }
+            }
+
+            _ = bands_rx.changed() => {
+                state.fft_bands = bands_rx.borrow().clone();
             }
 
             _ = redraw_ticker.tick() => {
