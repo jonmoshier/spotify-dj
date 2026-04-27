@@ -5,15 +5,15 @@ mod error;
 mod spotify;
 mod ui;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use app::AppState;
 use config::Config;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use spotify::{auth::SpotifyAuth, player::SpotifyPlayer};
 use std::io;
 use std::time::Duration;
@@ -41,7 +41,9 @@ async fn main() -> Result<()> {
 
     let config_dir = Config::config_dir()?;
     let mut auth = SpotifyAuth::new(&config.auth.client_id, config_dir).await?;
-    auth.authenticate().await.context("Spotify authentication failed")?;
+    auth.authenticate()
+        .await
+        .context("Spotify authentication failed")?;
 
     let access_token = auth.access_token().await?;
 

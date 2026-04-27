@@ -1,18 +1,15 @@
 use anyhow::{Context, Result};
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::{
+    Session,
     authentication::Credentials,
     config::{DeviceType, SessionConfig},
-    Session,
 };
 use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::{
     audio_backend,
     config::{AudioFormat, Bitrate, PlayerConfig},
-    mixer::{
-        softmixer::SoftMixer,
-        Mixer, MixerConfig,
-    },
+    mixer::{Mixer, MixerConfig, softmixer::SoftMixer},
     player::{Player, PlayerEventChannel},
 };
 use std::{sync::Arc, time::Duration};
@@ -36,10 +33,8 @@ impl SpotifyPlayer {
 
         let session = Session::new(session_config, None);
 
-        let mixer = Arc::new(
-            SoftMixer::open(MixerConfig::default())
-                .context("failed to create mixer")?,
-        );
+        let mixer =
+            Arc::new(SoftMixer::open(MixerConfig::default()).context("failed to create mixer")?);
 
         let player_config = PlayerConfig {
             bitrate: Bitrate::Bitrate320,
@@ -63,15 +58,24 @@ impl SpotifyPlayer {
             ..Default::default()
         };
 
-        let (spirc, spirc_task) =
-            Spirc::new(connect_config, session.clone(), credentials, player.clone(), mixer)
-                .await
-                .context("failed to create Spirc")?;
+        let (spirc, spirc_task) = Spirc::new(
+            connect_config,
+            session.clone(),
+            credentials,
+            player.clone(),
+            mixer,
+        )
+        .await
+        .context("failed to create Spirc")?;
 
         // Drive the Spirc state machine in the background.
         tokio::spawn(spirc_task);
 
-        Ok(Self { spirc, player, session })
+        Ok(Self {
+            spirc,
+            player,
+            session,
+        })
     }
 
     pub fn event_channel(&self) -> PlayerEventChannel {

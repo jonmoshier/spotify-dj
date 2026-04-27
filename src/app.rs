@@ -163,11 +163,13 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use librespot_core::{spotify_id::SpotifyId, SpotifyUri};
+    use librespot_core::{SpotifyUri, spotify_id::SpotifyId};
     use librespot_playback::player::PlayerEvent;
 
     fn make_uri() -> SpotifyUri {
-        SpotifyUri::Track { id: SpotifyId { id: 1 } }
+        SpotifyUri::Track {
+            id: SpotifyId { id: 1 },
+        }
     }
 
     fn default_state() -> AppState {
@@ -189,10 +191,14 @@ mod tests {
     fn cycle_focus_visits_all_panels() {
         let mut state = default_state();
         // starts at Library
-        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::DeckA));
-        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::DeckB));
-        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::Mixer));
-        state.cycle_focus(); assert!(matches!(state.focus, UiFocus::Library));
+        state.cycle_focus();
+        assert!(matches!(state.focus, UiFocus::DeckA));
+        state.cycle_focus();
+        assert!(matches!(state.focus, UiFocus::DeckB));
+        state.cycle_focus();
+        assert!(matches!(state.focus, UiFocus::Mixer));
+        state.cycle_focus();
+        assert!(matches!(state.focus, UiFocus::Library));
     }
 
     #[test]

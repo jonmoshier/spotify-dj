@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use rspotify::{
-    model::Token,
-    prelude::*,
-    scopes, AuthCodePkceSpotify, Config as SpotifyConfig, Credentials, OAuth,
+    AuthCodePkceSpotify, Config as SpotifyConfig, Credentials, OAuth, model::Token, prelude::*,
+    scopes,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;

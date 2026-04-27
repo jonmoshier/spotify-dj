@@ -65,8 +65,7 @@ impl Config {
         let text = fs::read_to_string(&path)
             .with_context(|| format!("could not read config at {}", path.display()))?;
 
-        toml::from_str(&text)
-            .with_context(|| format!("invalid config at {}", path.display()))
+        toml::from_str(&text).with_context(|| format!("invalid config at {}", path.display()))
     }
 
     pub fn save(&self) -> Result<()> {
@@ -106,9 +105,17 @@ mod tests {
     #[test]
     fn toml_round_trip() {
         let original = Config {
-            auth: AuthConfig { client_id: "abc123".to_string() },
-            playback: PlaybackConfig { device_name: "my-dj".to_string(), bitrate: 160 },
-            ui: UiConfig { crossfade_duration_secs: 5, default_volume: 60 },
+            auth: AuthConfig {
+                client_id: "abc123".to_string(),
+            },
+            playback: PlaybackConfig {
+                device_name: "my-dj".to_string(),
+                bitrate: 160,
+            },
+            ui: UiConfig {
+                crossfade_duration_secs: 5,
+                default_volume: 60,
+            },
         };
         let serialized = toml::to_string_pretty(&original).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
