@@ -191,4 +191,11 @@ impl SpotifyAuth {
     pub fn clear_tokens(&self) {
         fs::remove_file(&self.token_path).ok();
     }
+
+    /// Extract the current access token for use with librespot.
+    pub async fn access_token(&self) -> Result<String> {
+        let locked = self.client.token.lock().await.unwrap();
+        let token = locked.as_ref().context("not authenticated")?;
+        Ok(token.access_token.clone())
+    }
 }
