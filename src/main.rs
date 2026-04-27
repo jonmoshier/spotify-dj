@@ -393,7 +393,7 @@ fn handle_mouse(
     use app::UiFocus;
 
     let deck_bottom = size.height * 60 / 100;
-    let lib_right = size.width * 30 / 100;
+    let lib_right = size.width * 50 / 100;
 
     let in_deck_area = row < deck_bottom;
     let in_lib = !in_deck_area && col < lib_right;
@@ -450,7 +450,22 @@ fn handle_mixer_keys(code: KeyCode, state: &mut AppState, _player: &SpotifyPlaye
             } else {
                 let secs = state.config.ui.crossfade_duration_secs;
                 state.start_crossfade(secs);
-                state.set_status(format!("Crossfading over {secs}s…"));
+                let switch_label = state
+                    .crossfade
+                    .as_ref()
+                    .map(|cf| {
+                        let midpoint = cf.total_ms / 2;
+                        if cf.switch_at_ms != midpoint {
+                            format!(
+                                "Crossfading over {secs}s — switching on downbeat at {:.1}s",
+                                cf.switch_at_ms as f32 / 1000.0
+                            )
+                        } else {
+                            format!("Crossfading over {secs}s…")
+                        }
+                    })
+                    .unwrap_or_else(|| format!("Crossfading over {secs}s…"));
+                state.set_status(switch_label);
             }
         }
         KeyCode::Char('5') => {

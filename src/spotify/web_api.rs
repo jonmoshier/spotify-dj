@@ -32,7 +32,7 @@ impl SpotifyWebApi {
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<TrackSummary>> {
         let result = self
             .client
-            .search(query, SearchType::Track, None, None, Some(10), None)
+            .search(query, SearchType::Track, None, None, Some(50), None)
             .await
             .context("search request failed")?;
 

@@ -40,9 +40,12 @@ spotify-dj is a keyboard-driven terminal application that presents a Traktor-sty
 |---|---|---|
 | Direct audio streaming | ✅ Feasible | Via librespot — reverse-engineered Spotify protocols |
 | Spotify Connect device | ✅ Feasible | App appears in the Spotify device picker on other devices |
-| BPM, key, energy metadata | ✅ Available | Spotify Audio Features API |
+| BPM detection | ✅ Implemented | Onset detection on live PCM in `audio/bpm.rs`; updates every ~3s |
 | Real-time frequency visualizer | ✅ Feasible | FFT computed on raw PCM from librespot |
 | Dual deck + crossfade | ✅ Feasible | One stream at a time; Deck B holds metadata until crossfade |
+| Key detection | ⚠️ Not implemented | Requires chromagram analysis; not yet built |
+| Energy display | ⚠️ Not implemented | Derivable from PCM RMS; not yet built |
+| BPM/key/energy from Spotify API | ❌ Unavailable | Audio Features API restricted to Spotify partners as of 2024 |
 | True simultaneous dual playback | ❌ Not possible | Spotify only allows one active stream per account |
 | Waveform data from API | ❌ Deprecated | Audio Analysis endpoint was removed November 2024 |
 | Free Spotify accounts | ❌ Not possible | librespot requires Premium |
@@ -98,7 +101,7 @@ librespot uses Spotify's internal protocols rather than the public Web API. It i
 │  ┌───────────────────────┐  ┌───────────────────────┐   │
 │  │  librespot Player     │  │  rspotify Web API      │   │
 │  │  - audio stream/PCM   │  │  - search tracks       │   │
-│  │  - volume control     │  │  - audio features      │   │
+│  │  - volume control     │  │  - search tracks       │   │
 │  │  - Connect device     │  │  - playlists/library   │   │
 │  └───────────────────────┘  └───────────────────────┘   │
 ├──────────────────────────────────────────────────────────┤
@@ -198,7 +201,7 @@ librespot::Session::connect(session_config, credentials)
       (registers as Connect device, handles remote commands)
 ```
 
-On each `PlayerEvent::Playing { track_id, .. }`, the Web API client fetches audio features for the track and populates the active deck's BPM/key/energy fields.
+BPM is detected locally via onset detection on the live PCM stream (`audio/bpm.rs`) — the Spotify Audio Features API is restricted to partners and unavailable for personal use. Key and energy are not yet implemented.
 
 ---
 
@@ -213,20 +216,19 @@ Key endpoints used:
 | Endpoint | rspotify method | Purpose |
 |---|---|---|
 | `GET /search` | `search()` | Library search |
-| `GET /audio-features/{id}` | `track_features()` | BPM, key, energy |
 | `GET /me/playlists` | `current_user_playlists()` | Playlist browser |
 | `GET /playlists/{id}/tracks` | `playlist_items()` | Tracks in a playlist |
 | `GET /me/tracks` | `current_user_saved_tracks()` | Liked songs |
 
-**Audio features displayed:**
+> **Note:** `GET /audio-features/{id}` (BPM, key, energy) is restricted to Spotify partner apps and unavailable for personal developer accounts as of 2024. BPM is instead derived locally from the live PCM stream via onset detection (`audio/bpm.rs`).
 
-| Spotify field | Display |
+**Deck metadata sources:**
+
+| Field | Source |
 |---|---|
-| `tempo` | `128.0 BPM` |
-| `key` + `mode` | `C maj` / `A min` (pitch class integer → note name) |
-| `energy` | Progress gauge 0–100% |
-| `loudness` | dB value |
-| `danceability` | Optional secondary display |
+| BPM | Local onset detection on live PCM — updates every ~3s after playback starts |
+| Key | Not implemented — would require chromagram/chroma vector analysis |
+| Energy | Not implemented — derivable from PCM RMS amplitude |
 
 ---
 
@@ -380,14 +382,15 @@ default_volume = 80            # 0–100
 ### Phase 3 — Web API Integration
 - [ ] rspotify client sharing same OAuth tokens
 - [ ] Track search → Library widget results
-- [ ] `GET /audio-features/{id}` → BPM / key / energy display on decks
 - [ ] Playlist and saved-tracks browsing
+- ~~`GET /audio-features/{id}` → BPM / key / energy~~ ❌ API restricted to partners
 
-### Phase 4 — FFT Visualizer
+### Phase 4 — FFT Visualizer & BPM
 - [ ] Custom `AudioSink` that tees PCM to an `mpsc` channel
 - [ ] FFT worker task (rustfft, ~30 fps)
 - [ ] 20-band logarithmic frequency bucketing
 - [ ] `VisualizerWidget` using Ratatui `BarChart`
+- [ ] BPM detection via onset detection on live PCM (`audio/bpm.rs`)
 
 ### Phase 5 — Dual Deck + Crossfade
 - [ ] Load track to Deck A (`L`) or Deck B (`R`)
@@ -411,7 +414,8 @@ default_volume = 80            # 0–100
 |---|---|
 | No simultaneous dual audio streams | One stream at a time; Deck B is visual-only until crossfade midpoint |
 | No waveform data from Spotify API | Real-time FFT on live PCM gives a spectrum analyzer (better than a static waveform) |
-| Audio Analysis API deprecated (Nov 2024) | BPM/key from Audio Features API; beat-grid visualization not planned |
+| Audio Features API restricted (2024) | BPM detected locally via onset detection on live PCM; key/energy not yet implemented |
+| Audio Analysis API deprecated (Nov 2024) | Beat-grid visualization not planned |
 | librespot ToS gray area | Personal use only; not for public/commercial distribution |
 | Spotify Premium required | Documented in README; librespot rejects free accounts at the protocol level |
 
@@ -423,4 +427,4 @@ default_volume = 80            # 0–100
 - [librespot](https://github.com/librespot-org/librespot)
 - [rspotify docs](https://docs.rs/rspotify)
 - [Ratatui](https://ratatui.rs)
-- [Spotify Audio Features reference](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)
+- [Spotify Audio Features reference](https://developer.spotify.com/documentation/web-api/reference/get-audio-features) — restricted to partner apps as of 2024, not usable for personal projects
