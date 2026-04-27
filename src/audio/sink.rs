@@ -5,15 +5,15 @@ use librespot_playback::{
 };
 use std::sync::mpsc::SyncSender;
 
-/// Wraps a real audio sink and tees raw PCM samples to a channel for analysis.
+/// Wraps a real audio sink and tees raw PCM samples to one or more consumers.
 pub struct TeeSink {
     inner: Box<dyn Sink>,
-    pcm_tx: SyncSender<Vec<f64>>,
+    pcm_txs: Vec<SyncSender<Vec<f64>>>,
 }
 
 impl TeeSink {
-    pub fn new(inner: Box<dyn Sink>, pcm_tx: SyncSender<Vec<f64>>) -> Self {
-        Self { inner, pcm_tx }
+    pub fn new(inner: Box<dyn Sink>, pcm_txs: Vec<SyncSender<Vec<f64>>>) -> Self {
+        Self { inner, pcm_txs }
     }
 }
 
@@ -29,8 +29,10 @@ impl Sink for TeeSink {
     fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
         // Borrow samples before moving packet into inner sink.
         if let AudioPacket::Samples(ref samples) = packet {
-            // try_send: drop the chunk if the detector is backed up — never block the audio thread.
-            let _ = self.pcm_tx.try_send(samples.clone());
+            // try_send: drop the chunk if a consumer is backed up — never block the audio thread.
+            for tx in &self.pcm_txs {
+                let _ = tx.try_send(samples.clone());
+            }
         }
         self.inner.write(packet, converter)
     }

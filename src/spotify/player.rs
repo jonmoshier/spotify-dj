@@ -15,7 +15,7 @@ use librespot_playback::{
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 
-use crate::audio::{bpm::BpmDetector, sink::TeeSink};
+use crate::audio::{bpm::BpmDetector, fft::FftAnalyzer, sink::TeeSink};
 use crate::config::Config;
 
 pub struct SpotifyPlayer {
@@ -23,6 +23,7 @@ pub struct SpotifyPlayer {
     pub player: Arc<Player>,
     pub session: Session,
     pub bpm_rx: watch::Receiver<Option<f32>>,
+    pub bands_rx: watch::Receiver<Vec<f32>>,
     pub device_id: String,
 }
 
@@ -49,20 +50,27 @@ impl SpotifyPlayer {
         let audio_format = AudioFormat::default();
         let volume_getter = mixer.get_soft_volume();
 
-        // PCM channel: audio thread → BPM detector thread
-        let (pcm_tx, pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f64>>(128);
-        // BPM channel: detector thread → event loop (watch = always reads latest value)
+        // PCM channels: audio thread → analysis threads (BPM, FFT)
+        let (bpm_pcm_tx, bpm_pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f64>>(128);
+        let (fft_pcm_tx, fft_pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f64>>(128);
+        // Output channels: analysis thread → event loop (watch = always reads latest value)
         let (bpm_tx, bpm_rx) = watch::channel::<Option<f32>>(None);
+        let (bands_tx, bands_rx) = watch::channel::<Vec<f32>>(Vec::new());
 
         let sink_builder = audio_backend::find(None).expect("no audio backend found");
         let player = Player::new(player_config, session.clone(), volume_getter, move || {
             let real_sink = sink_builder(None, audio_format);
-            Box::new(TeeSink::new(real_sink, pcm_tx))
+            Box::new(TeeSink::new(
+                real_sink,
+                vec![bpm_pcm_tx.clone(), fft_pcm_tx.clone()],
+            ))
         });
 
-        // BPM detector runs in a dedicated OS thread (blocking recv loop).
-        let detector = BpmDetector::new(pcm_rx, bpm_tx);
-        std::thread::spawn(move || detector.run());
+        // Analysis runs in dedicated OS threads (blocking recv loops).
+        let bpm_detector = BpmDetector::new(bpm_pcm_rx, bpm_tx);
+        std::thread::spawn(move || bpm_detector.run());
+        let fft_analyzer = FftAnalyzer::new(fft_pcm_rx, bands_tx);
+        std::thread::spawn(move || fft_analyzer.run());
 
         let connect_config = ConnectConfig {
             name: config.playback.device_name.clone(),
@@ -88,6 +96,7 @@ impl SpotifyPlayer {
             player,
             session,
             bpm_rx,
+            bands_rx,
             device_id,
         })
     }

@@ -1,4 +1,5 @@
 use crate::app::DeckState;
+use crate::ui::visualizer::Visualizer;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -16,6 +17,7 @@ pub fn draw_deck(
     label: &str,
     is_active: bool,
     is_focused: bool,
+    bands: &[f32],
 ) {
     let border_color = if is_focused {
         Color::Cyan
@@ -110,13 +112,13 @@ pub fn draw_deck(
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(rows[4]);
 
-    let placeholder =
-        Paragraph::new("▁▂▃▄▅▄▃▂▁ ▂▃▅▆▅▃▂ ▁▂▃▄▅▄▂▁").style(Style::default().fg(if is_active {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        }));
-    frame.render_widget(placeholder, viz_rows[0]);
+    if is_active && !bands.is_empty() {
+        frame.render_widget(Visualizer::new(bands, Color::Cyan), viz_rows[0]);
+    } else {
+        let placeholder = Paragraph::new("▁▂▃▄▅▄▃▂▁ ▂▃▅▆▅▃▂ ▁▂▃▄▅▄▂▁")
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(placeholder, viz_rows[0]);
+    }
 
     let vol_gauge = Gauge::default()
         .percent(deck.volume as u16)
