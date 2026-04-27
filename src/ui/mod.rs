@@ -69,6 +69,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         mixer_rows[0],
         state.crossfader,
         state.focus == UiFocus::Mixer,
+        state.auto_fade,
     );
     draw_status(frame, mixer_rows[1], state);
 }
@@ -77,7 +78,7 @@ fn draw_status(frame: &mut Frame, area: Rect, state: &AppState) {
     let msg = state
         .status_message
         .as_deref()
-        .unwrap_or("[SPC] Play/Pause  [←→] Seek  [TAB] Focus  [L] →DeckA  [R] →DeckB  [X] Crossfade  [/] Search  [Q] Quit");
+        .unwrap_or("[SPC] Play/Pause  [←→] Seek  [TAB] Focus  [L] →DeckA  [R] →DeckB  [X] Crossfade  [A] Auto-fade  [/] Search  [Q] Quit");
 
     let widget = Paragraph::new(msg).block(
         Block::default()
