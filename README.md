@@ -2,6 +2,8 @@
 
 A Traktor-style terminal DJ app for Spotify. Dual decks, crossfader, BPM/key display, and a real-time frequency visualizer — all in your terminal.
 
+![](screengrab.png)
+
 **Requires Spotify Premium.**
 
 ## Setup
