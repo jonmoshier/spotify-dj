@@ -18,6 +18,7 @@ pub fn draw_deck(
     is_active: bool,
     is_focused: bool,
     bands: &[f32],
+    peaks: &[f32],
 ) {
     let border_color = if is_focused {
         Color::Cyan
@@ -113,7 +114,7 @@ pub fn draw_deck(
         .split(rows[4]);
 
     if is_active && !bands.is_empty() {
-        frame.render_widget(Visualizer::new(bands, Color::Cyan), viz_rows[0]);
+        frame.render_widget(Visualizer::new(bands, peaks), viz_rows[0]);
     } else {
         let placeholder = Paragraph::new("▁▂▃▄▅▄▃▂▁ ▂▃▅▆▅▃▂ ▁▂▃▄▅▄▂▁")
             .style(Style::default().fg(Color::DarkGray));
