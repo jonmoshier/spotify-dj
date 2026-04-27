@@ -91,13 +91,16 @@ pub struct AppState {
     pub focus: UiFocus,
     pub should_quit: bool,
     pub status_message: Option<String>,
-    /// Latest FFT band magnitudes (0..1) from the active audio stream.
+    /// Latest FFT band magnitudes (0..1), exponentially smoothed.
     pub fft_bands: Vec<f32>,
+    /// Per-band peak-hold values that decay after each update.
+    pub fft_peaks: Vec<f32>,
     /// When true, automatically start a crossfade as the active track nears its end.
     pub auto_fade: bool,
     /// URI of the last track auto-fade fired on. Prevents re-firing on the same track
     /// (e.g. after the position briefly oscillates near the end).
     pub auto_fade_last_fired_uri: Option<String>,
+    pub show_help: bool,
 }
 
 impl AppState {
@@ -120,8 +123,25 @@ impl AppState {
             should_quit: false,
             status_message: None,
             fft_bands: Vec::new(),
+            fft_peaks: Vec::new(),
+            show_help: false,
             auto_fade: false,
             auto_fade_last_fired_uri: None,
+        }
+    }
+
+    pub fn update_fft(&mut self, raw: Vec<f32>) {
+        const SMOOTH: f32 = 0.25;
+        const PEAK_DECAY: f32 = 0.012;
+
+        if self.fft_bands.len() != raw.len() {
+            self.fft_peaks = raw.clone();
+            self.fft_bands = raw;
+            return;
+        }
+        for i in 0..raw.len() {
+            self.fft_bands[i] = SMOOTH * raw[i] + (1.0 - SMOOTH) * self.fft_bands[i];
+            self.fft_peaks[i] = (self.fft_peaks[i] - PEAK_DECAY).max(self.fft_bands[i]);
         }
     }
 
@@ -248,9 +268,11 @@ impl AppState {
         let new_elapsed = (elapsed + delta_ms).min(total_ms);
         let progress = new_elapsed as f32 / total_ms as f32;
 
-        // Volume ramp: active fades out, incoming fades in
-        let active_vol = (start_vol as f32 * (1.0 - progress)).round() as u8;
-        let incoming_vol = (target_vol as f32 * progress).round() as u8;
+        // Equal-power crossfade: cos/sin curves keep perceived loudness constant.
+        // Linear ramps create a volume dip at the midpoint; this doesn't.
+        let angle = progress * std::f32::consts::FRAC_PI_2;
+        let active_vol = (start_vol as f32 * angle.cos()).round() as u8;
+        let incoming_vol = (target_vol as f32 * angle.sin()).round() as u8;
         self.active_deck_mut().volume = active_vol;
         self.inactive_deck_mut().volume = incoming_vol;
 
@@ -304,9 +326,32 @@ impl AppState {
         };
     }
 
-    /// Apply a librespot PlayerEvent to the active deck.
+    pub fn cycle_focus_back(&mut self) {
+        self.focus = match self.focus {
+            UiFocus::DeckA => UiFocus::Library,
+            UiFocus::DeckB => UiFocus::DeckA,
+            UiFocus::Mixer => UiFocus::DeckB,
+            UiFocus::Library => UiFocus::Mixer,
+        };
+    }
+
+    /// Apply a librespot PlayerEvent to the appropriate deck.
+    ///
+    /// Normally events update the active deck. During a crossfade, librespot
+    /// will emit events for the *incoming* track (TrackChanged, Playing, etc.)
+    /// while the active deck is still the outgoing one. Those events must
+    /// target the inactive (incoming) deck — otherwise the new track's
+    /// metadata overwrites the outgoing deck and appears duplicated.
     pub fn apply_player_event(&mut self, event: PlayerEvent) {
-        let deck = self.active_deck_mut();
+        let route_to_inactive = match (self.crossfade.as_ref(), event_track_uri(&event)) {
+            (Some(cf), Some(uri)) => cf.cued_uri == uri,
+            _ => false,
+        };
+        let deck = if route_to_inactive {
+            self.inactive_deck_mut()
+        } else {
+            self.active_deck_mut()
+        };
         match event {
             PlayerEvent::Playing { position_ms, .. } => {
                 deck.is_playing = true;
@@ -329,7 +374,7 @@ impl AppState {
                 deck.position_ms = 0;
             }
             PlayerEvent::TrackChanged { audio_item } => {
-                self.apply_track_info(*audio_item);
+                Self::apply_track_info(deck, &audio_item);
             }
             // Ignore events we don't need to act on.
             _ => {}
@@ -345,14 +390,32 @@ impl AppState {
         }
     }
 
-    fn apply_track_info(&mut self, item: AudioItem) {
-        let deck = self.active_deck_mut();
+    fn apply_track_info(deck: &mut DeckState, item: &AudioItem) {
         deck.track_uri = Some(item.uri.clone());
         deck.track_title = Some(item.name.clone());
-        deck.track_artist = Some(primary_artist(&item));
+        deck.track_artist = Some(primary_artist(item));
         deck.duration_ms = item.duration_ms;
         deck.position_ms = 0;
         deck.needs_initial_play = false; // librespot owns this track
+    }
+}
+
+/// Extract the Spotify URI a PlayerEvent refers to (if any).
+fn event_track_uri(event: &PlayerEvent) -> Option<String> {
+    match event {
+        PlayerEvent::Playing { track_id, .. }
+        | PlayerEvent::Paused { track_id, .. }
+        | PlayerEvent::Stopped { track_id, .. }
+        | PlayerEvent::Seeked { track_id, .. }
+        | PlayerEvent::PositionChanged { track_id, .. }
+        | PlayerEvent::PositionCorrection { track_id, .. }
+        | PlayerEvent::EndOfTrack { track_id, .. }
+        | PlayerEvent::Loading { track_id, .. }
+        | PlayerEvent::Preloading { track_id, .. }
+        | PlayerEvent::Unavailable { track_id, .. }
+        | PlayerEvent::TimeToPreloadNextTrack { track_id, .. } => track_id.to_uri().ok(),
+        PlayerEvent::TrackChanged { audio_item } => Some(audio_item.uri.clone()),
+        _ => None,
     }
 }
 
@@ -519,6 +582,64 @@ mod tests {
         // Cancel the fade and try again with the same active URI — should not refire.
         state.crossfade = None;
         assert!(!state.maybe_auto_fade());
+    }
+
+    #[test]
+    fn events_for_cued_uri_route_to_inactive_during_crossfade() {
+        let mut state = default_state();
+        let cued_track_id = make_uri();
+        let cued_uri = cued_track_id.to_uri().expect("to_uri");
+
+        // Active deck is mid-track; inactive deck has the cued URI loaded.
+        state.deck_a.track_uri = Some("spotify:track:other".into());
+        state.deck_a.is_playing = true;
+        state.deck_a.duration_ms = 100_000;
+        state.deck_a.position_ms = 95_000;
+        state.deck_b.track_uri = Some(cued_uri.clone());
+        state.config.ui.crossfade_duration_secs = 5;
+        assert!(state.start_crossfade(5));
+
+        // Librespot starts streaming the cued track. Active deck (A) must not
+        // be touched — it's still fading out the outgoing track.
+        state.apply_player_event(PlayerEvent::Playing {
+            play_request_id: 0,
+            track_id: cued_track_id,
+            position_ms: 0,
+        });
+
+        assert_eq!(
+            state.deck_a.position_ms, 95_000,
+            "outgoing deck position should not be reset by incoming track event"
+        );
+        assert!(
+            state.deck_b.is_playing,
+            "incoming deck should reflect the new playing state"
+        );
+        assert_eq!(state.deck_b.position_ms, 0);
+    }
+
+    #[test]
+    fn events_for_outgoing_uri_still_route_to_active_during_crossfade() {
+        let mut state = default_state();
+        let outgoing_track_id = make_uri();
+        let outgoing_uri = outgoing_track_id.to_uri().expect("to_uri");
+
+        state.deck_a.track_uri = Some(outgoing_uri);
+        state.deck_a.is_playing = true;
+        state.deck_b.track_uri = Some("spotify:track:incoming".into());
+        state.config.ui.crossfade_duration_secs = 5;
+        assert!(state.start_crossfade(5));
+
+        // A position update for the still-fading outgoing track should land on
+        // the outgoing (active) deck, not the incoming one.
+        state.apply_player_event(PlayerEvent::PositionChanged {
+            play_request_id: 0,
+            track_id: outgoing_track_id,
+            position_ms: 50_000,
+        });
+
+        assert_eq!(state.deck_a.position_ms, 50_000);
+        assert_eq!(state.deck_b.position_ms, 0);
     }
 
     #[test]

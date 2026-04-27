@@ -9,7 +9,10 @@ use anyhow::{Context, Result, bail};
 use app::{AppState, CrossfadeTick, WebApiEvent};
 use config::Config;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+        MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -17,6 +20,7 @@ use librespot_playback::player::PlayerEvent;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use spotify::{auth::SpotifyAuth, player::SpotifyPlayer, web_api::SpotifyWebApi};
 use std::sync::Arc;
+use std::thread;
 use std::{io, time::Duration};
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -67,7 +71,7 @@ async fn main() -> Result<()> {
 async fn run_tui(config: Config, player: SpotifyPlayer, web_api: SpotifyWebApi) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -80,7 +84,11 @@ async fn run_tui(config: Config, player: SpotifyPlayer, web_api: SpotifyWebApi) 
     let result = run_event_loop(&mut terminal, &mut state, player, web_api).await;
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -100,6 +108,16 @@ async fn run_event_loop(
 
     // Background tasks send results back here.
     let (web_tx, mut web_rx) = mpsc::channel::<WebApiEvent>(32);
+
+    // Dedicated thread for terminal input so events are never delayed by the redraw tick.
+    let (input_tx, mut input_rx) = mpsc::channel::<Event>(64);
+    thread::spawn(move || {
+        while let Ok(ev) = event::read() {
+            if input_tx.blocking_send(ev).is_err() {
+                break;
+            }
+        }
+    });
 
     loop {
         tokio::select! {
@@ -126,7 +144,20 @@ async fn run_event_loop(
             }
 
             _ = bands_rx.changed() => {
-                state.fft_bands = bands_rx.borrow().clone();
+                state.update_fft(bands_rx.borrow().clone());
+            }
+
+            Some(ev) = input_rx.recv() => {
+                match ev {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        handle_key(key.code, state, &player, &web_api, &web_tx);
+                    }
+                    Event::Mouse(mouse) => {
+                        let size = terminal.size()?;
+                        handle_mouse(mouse.kind, mouse.column, mouse.row, size.into(), state);
+                    }
+                    _ => {}
+                }
             }
 
             _ = redraw_ticker.tick() => {
@@ -152,14 +183,6 @@ async fn run_event_loop(
                 }
 
                 terminal.draw(|f| ui::draw(f, state))?;
-
-                if event::poll(Duration::ZERO)? {
-                    if let Event::Key(key) = event::read()? {
-                        if key.kind == KeyEventKind::Press {
-                            handle_key(key.code, state, &player, &web_api, &web_tx);
-                        }
-                    }
-                }
             }
         }
 
@@ -181,13 +204,33 @@ fn handle_key(
 ) {
     use app::UiFocus;
 
+    // Help overlay intercepts everything except its own toggle/close keys.
+    if state.show_help {
+        match code {
+            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                state.show_help = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             state.should_quit = true;
             return;
         }
+        KeyCode::Char('?') => {
+            state.show_help = true;
+            return;
+        }
         KeyCode::Tab => {
             state.cycle_focus();
+            state.status_message = None;
+            return;
+        }
+        KeyCode::BackTab => {
+            state.cycle_focus_back();
             state.status_message = None;
             return;
         }
@@ -334,6 +377,57 @@ fn handle_deck_keys(
             state.active_deck_mut().volume = vol;
             if let Err(e) = player.set_volume(vol) {
                 state.set_status(format!("volume error: {e}"));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_mouse(
+    kind: MouseEventKind,
+    col: u16,
+    row: u16,
+    size: ratatui::layout::Rect,
+    state: &mut AppState,
+) {
+    use app::UiFocus;
+
+    let deck_bottom = size.height * 60 / 100;
+    let lib_right = size.width * 30 / 100;
+
+    let in_deck_area = row < deck_bottom;
+    let in_lib = !in_deck_area && col < lib_right;
+    let in_mixer = !in_deck_area && col >= lib_right;
+
+    match kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            state.status_message = None;
+            if in_deck_area {
+                state.focus = if col < size.width / 2 {
+                    UiFocus::DeckA
+                } else {
+                    UiFocus::DeckB
+                };
+            } else if in_lib {
+                state.focus = UiFocus::Library;
+            } else {
+                state.focus = UiFocus::Mixer;
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if in_lib {
+                if state.library.selected + 1 < state.library.results.len() {
+                    state.library.selected += 1;
+                }
+            } else if in_mixer {
+                state.crossfader = (state.crossfader + 0.05).min(1.0);
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if in_lib {
+                state.library.selected = state.library.selected.saturating_sub(1);
+            } else if in_mixer {
+                state.crossfader = (state.crossfader - 0.05).max(-1.0);
             }
         }
         _ => {}

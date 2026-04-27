@@ -5,7 +5,7 @@ use tokio::sync::watch;
 const SAMPLE_RATE: f32 = 44100.0;
 const FFT_SIZE: usize = 2048; // ~46 ms window
 const HOP_SIZE: usize = FFT_SIZE / 2; // 50% overlap → ~43 fps
-pub const BAND_COUNT: usize = 20;
+pub const BAND_COUNT: usize = 64;
 const FREQ_MIN: f32 = 40.0;
 const FREQ_MAX: f32 = 16_000.0;
 // dB range mapped onto the 0..1 visualization scale.
