@@ -268,9 +268,11 @@ impl AppState {
         let new_elapsed = (elapsed + delta_ms).min(total_ms);
         let progress = new_elapsed as f32 / total_ms as f32;
 
-        // Volume ramp: active fades out, incoming fades in
-        let active_vol = (start_vol as f32 * (1.0 - progress)).round() as u8;
-        let incoming_vol = (target_vol as f32 * progress).round() as u8;
+        // Equal-power crossfade: cos/sin curves keep perceived loudness constant.
+        // Linear ramps create a volume dip at the midpoint; this doesn't.
+        let angle = progress * std::f32::consts::FRAC_PI_2;
+        let active_vol = (start_vol as f32 * angle.cos()).round() as u8;
+        let incoming_vol = (target_vol as f32 * angle.sin()).round() as u8;
         self.active_deck_mut().volume = active_vol;
         self.inactive_deck_mut().volume = incoming_vol;
 
