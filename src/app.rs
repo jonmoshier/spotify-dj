@@ -17,6 +17,9 @@ pub struct CrossfadeState {
     pub cued_uri: String,
     pub start_volume: u8,  // active deck volume at fade start
     pub target_volume: u8, // incoming deck volume at fade end
+    /// When to fire PlayTrack — snapped to nearest bar boundary if BPM is known,
+    /// otherwise total_ms / 2.
+    pub switch_at_ms: u32,
 }
 
 pub enum WebApiEvent {
@@ -203,22 +206,51 @@ impl AppState {
         };
     }
 
-    /// Begin a crossfade to the inactive deck. Returns `None` if the inactive deck has no track.
+    /// Begin a crossfade to the inactive deck. Returns false if the inactive deck has no track.
     pub fn start_crossfade(&mut self, duration_secs: u64) -> bool {
         let Some(uri) = self.inactive_deck_state().track_uri.clone() else {
             return false;
         };
         let start_volume = self.active_deck_state().volume;
         let target_volume = self.config.ui.default_volume;
+        let total_ms = (duration_secs as u32).saturating_mul(1000);
+        let switch_at_ms = self.compute_switch_ms(total_ms);
         self.crossfade = Some(CrossfadeState {
-            total_ms: (duration_secs as u32).saturating_mul(1000),
+            total_ms,
             elapsed_ms: 0,
             midpoint_fired: false,
             cued_uri: uri,
             start_volume,
             target_volume,
+            switch_at_ms,
         });
         true
+    }
+
+    /// Snap the stream switch to the nearest bar boundary at or after the midpoint.
+    /// Falls back to the midpoint if BPM is unavailable.
+    fn compute_switch_ms(&self, total_ms: u32) -> u32 {
+        let midpoint = total_ms / 2;
+        let active = self.active_deck_state();
+
+        let Some(bpm) = active.bpm else {
+            return midpoint;
+        };
+        if bpm <= 0.0 {
+            return midpoint;
+        }
+
+        let beat_ms = 60_000.0 / bpm;
+        let bar_ms = beat_ms * 4.0;
+
+        // Project the track position at the midpoint of the fade.
+        let pos_at_mid = active.position_ms as f32 + midpoint as f32;
+        let pos_in_bar = pos_at_mid % bar_ms;
+        let ms_to_next_bar = bar_ms - pos_in_bar;
+
+        // Snap to that bar boundary, but never past total_ms.
+        let candidate = (midpoint as f32 + ms_to_next_bar).round() as u32;
+        candidate.min(total_ms)
     }
 
     /// If auto-fade is enabled, the active track is playing, and its remaining
@@ -252,7 +284,7 @@ impl AppState {
 
     /// Advance the crossfade by `delta_ms`. Called from the 100ms redraw tick.
     pub fn tick_crossfade(&mut self, delta_ms: u32) -> CrossfadeTick {
-        let (total_ms, elapsed, midpoint_fired, start_vol, target_vol, cued_uri) =
+        let (total_ms, elapsed, midpoint_fired, start_vol, target_vol, switch_at_ms, cued_uri) =
             match self.crossfade.as_ref() {
                 None => return CrossfadeTick::Continue,
                 Some(cf) => (
@@ -261,6 +293,7 @@ impl AppState {
                     cf.midpoint_fired,
                     cf.start_volume,
                     cf.target_volume,
+                    cf.switch_at_ms,
                     cf.cued_uri.clone(),
                 ),
             };
@@ -286,7 +319,7 @@ impl AppState {
             cf.elapsed_ms = new_elapsed;
         }
 
-        if !midpoint_fired && progress >= 0.5 {
+        if !midpoint_fired && new_elapsed >= switch_at_ms {
             if let Some(cf) = self.crossfade.as_mut() {
                 cf.midpoint_fired = true;
             }

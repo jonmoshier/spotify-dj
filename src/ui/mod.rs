@@ -48,10 +48,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         &state.fft_peaks,
     );
 
-    // Bottom row: library (30%) | mixer + status (70%)
+    // Bottom row: library (50%) | mixer + status (50%)
     let bottom_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[1]);
 
     library::draw_library(
