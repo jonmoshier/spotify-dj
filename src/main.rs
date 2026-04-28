@@ -235,9 +235,7 @@ fn handle_key(
             state.status_message = None;
             return;
         }
-        KeyCode::Char('a') | KeyCode::Char('A')
-            if !matches!(state.focus, UiFocus::Library) =>
-        {
+        KeyCode::Char('a') | KeyCode::Char('A') if !matches!(state.focus, UiFocus::Library) => {
             state.auto_fade = !state.auto_fade;
             // Rearm: a fresh toggle should re-evaluate the current track.
             state.auto_fade_last_fired_uri = None;
@@ -259,7 +257,11 @@ fn handle_key(
     }
 }
 
-fn fire_search(state: &mut AppState, web_api: &Arc<SpotifyWebApi>, web_tx: &mpsc::Sender<WebApiEvent>) {
+fn fire_search(
+    state: &mut AppState,
+    web_api: &Arc<SpotifyWebApi>,
+    web_tx: &mpsc::Sender<WebApiEvent>,
+) {
     let query = state.library.build_query();
     if query.is_empty() {
         state.set_status("Nothing to search — type a query or set a filter");
@@ -275,7 +277,8 @@ fn fire_search(state: &mut AppState, web_api: &Arc<SpotifyWebApi>, web_tx: &mpsc
                 // Collect unique artist IDs for genre batch fetch.
                 let artist_ids: Vec<String> = {
                     let mut seen = std::collections::HashSet::new();
-                    results.iter()
+                    results
+                        .iter()
                         .map(|t| t.artist_id.clone())
                         .filter(|id| !id.is_empty() && seen.insert(id.clone()))
                         .collect()
@@ -285,7 +288,9 @@ fn fire_search(state: &mut AppState, web_api: &Arc<SpotifyWebApi>, web_tx: &mpsc
                 // Follow-up: fetch genres for all unique artists.
                 if !artist_ids.is_empty() {
                     match api.fetch_artist_genres(&artist_ids).await {
-                        Ok(genre_map) => { let _ = tx.send(WebApiEvent::GenreResults(genre_map)).await; }
+                        Ok(genre_map) => {
+                            let _ = tx.send(WebApiEvent::GenreResults(genre_map)).await;
+                        }
                         Err(e) => eprintln!("genre fetch error: {e}"),
                     }
                 }
@@ -316,57 +321,122 @@ fn handle_library_keys(
 
     match state.library.search_focus {
         SearchFocus::Freetext => match code {
-            KeyCode::Char(c) => { state.library.search_query.push(c); }
-            KeyCode::Backspace => { state.library.search_query.pop(); }
+            KeyCode::Char(c) => {
+                state.library.search_query.push(c);
+            }
+            KeyCode::Backspace => {
+                state.library.search_query.pop();
+            }
             KeyCode::Enter => fire_search(state, web_api, web_tx),
-            KeyCode::Esc => { state.library.search_focus = SearchFocus::None; state.status_message = None; }
-            KeyCode::Tab => { state.library.search_focus = SearchFocus::Artist; }
+            KeyCode::Esc => {
+                state.library.search_focus = SearchFocus::None;
+                state.status_message = None;
+            }
+            KeyCode::Tab => {
+                state.library.search_focus = SearchFocus::Artist;
+            }
             _ => {}
         },
         SearchFocus::Artist => match code {
-            KeyCode::Char(c) if ctrl && c == 'a' => { state.library.filter_artist.clear(); }
-            KeyCode::Char(c) => { state.library.filter_artist.push(c); }
-            KeyCode::Backspace => { state.library.filter_artist.pop(); }
+            KeyCode::Char(c) if ctrl && c == 'a' => {
+                state.library.filter_artist.clear();
+            }
+            KeyCode::Char(c) => {
+                state.library.filter_artist.push(c);
+            }
+            KeyCode::Backspace => {
+                state.library.filter_artist.pop();
+            }
             KeyCode::Enter => fire_search(state, web_api, web_tx),
-            KeyCode::Esc => { state.library.search_focus = SearchFocus::None; state.status_message = None; }
-            KeyCode::Tab => { state.library.search_focus = SearchFocus::Title; }
+            KeyCode::Esc => {
+                state.library.search_focus = SearchFocus::None;
+                state.status_message = None;
+            }
+            KeyCode::Tab => {
+                state.library.search_focus = SearchFocus::Title;
+            }
             _ => {}
         },
         SearchFocus::Title => match code {
-            KeyCode::Char(c) if ctrl && c == 't' => { state.library.filter_title.clear(); }
-            KeyCode::Char(c) => { state.library.filter_title.push(c); }
-            KeyCode::Backspace => { state.library.filter_title.pop(); }
+            KeyCode::Char(c) if ctrl && c == 't' => {
+                state.library.filter_title.clear();
+            }
+            KeyCode::Char(c) => {
+                state.library.filter_title.push(c);
+            }
+            KeyCode::Backspace => {
+                state.library.filter_title.pop();
+            }
             KeyCode::Enter => fire_search(state, web_api, web_tx),
-            KeyCode::Esc => { state.library.search_focus = SearchFocus::None; state.status_message = None; }
-            KeyCode::Tab => { state.library.search_focus = SearchFocus::Genre; }
+            KeyCode::Esc => {
+                state.library.search_focus = SearchFocus::None;
+                state.status_message = None;
+            }
+            KeyCode::Tab => {
+                state.library.search_focus = SearchFocus::Genre;
+            }
             _ => {}
         },
         SearchFocus::Genre => match code {
-            KeyCode::Char(c) if ctrl && c == 'g' => { state.library.filter_genre.clear(); }
-            KeyCode::Char(c) => { state.library.filter_genre.push(c); }
-            KeyCode::Backspace => { state.library.filter_genre.pop(); }
+            KeyCode::Char(c) if ctrl && c == 'g' => {
+                state.library.filter_genre.clear();
+            }
+            KeyCode::Char(c) => {
+                state.library.filter_genre.push(c);
+            }
+            KeyCode::Backspace => {
+                state.library.filter_genre.pop();
+            }
             KeyCode::Enter => fire_search(state, web_api, web_tx),
-            KeyCode::Esc => { state.library.search_focus = SearchFocus::None; state.status_message = None; }
-            KeyCode::Tab => { state.library.search_focus = SearchFocus::Year; }
+            KeyCode::Esc => {
+                state.library.search_focus = SearchFocus::None;
+                state.status_message = None;
+            }
+            KeyCode::Tab => {
+                state.library.search_focus = SearchFocus::Year;
+            }
             _ => {}
         },
         SearchFocus::Year => match code {
-            KeyCode::Char(c) if ctrl && c == 'y' => { state.library.filter_year.clear(); }
-            KeyCode::Char(c) => { state.library.filter_year.push(c); }
-            KeyCode::Backspace => { state.library.filter_year.pop(); }
+            KeyCode::Char(c) if ctrl && c == 'y' => {
+                state.library.filter_year.clear();
+            }
+            KeyCode::Char(c) => {
+                state.library.filter_year.push(c);
+            }
+            KeyCode::Backspace => {
+                state.library.filter_year.pop();
+            }
             KeyCode::Enter => fire_search(state, web_api, web_tx),
-            KeyCode::Esc => { state.library.search_focus = SearchFocus::None; state.status_message = None; }
-            KeyCode::Tab => { state.library.search_focus = SearchFocus::Freetext; }
+            KeyCode::Esc => {
+                state.library.search_focus = SearchFocus::None;
+                state.status_message = None;
+            }
+            KeyCode::Tab => {
+                state.library.search_focus = SearchFocus::Freetext;
+            }
             _ => {}
         },
         SearchFocus::None => {
             // Ctrl+letter clears individual filters without entering edit mode.
             if ctrl {
                 match code {
-                    KeyCode::Char('a') => { state.library.filter_artist.clear(); return; }
-                    KeyCode::Char('t') => { state.library.filter_title.clear(); return; }
-                    KeyCode::Char('g') => { state.library.filter_genre.clear(); return; }
-                    KeyCode::Char('y') => { state.library.filter_year.clear(); return; }
+                    KeyCode::Char('a') => {
+                        state.library.filter_artist.clear();
+                        return;
+                    }
+                    KeyCode::Char('t') => {
+                        state.library.filter_title.clear();
+                        return;
+                    }
+                    KeyCode::Char('g') => {
+                        state.library.filter_genre.clear();
+                        return;
+                    }
+                    KeyCode::Char('y') => {
+                        state.library.filter_year.clear();
+                        return;
+                    }
                     _ => {}
                 }
             }
@@ -389,7 +459,9 @@ fn handle_library_keys(
                 }
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     state.library.search_focus = SearchFocus::Year;
-                    state.set_status("[Enter] search  [Tab] → freetext  [Ctrl+Y] clear  [Esc] cancel");
+                    state.set_status(
+                        "[Enter] search  [Tab] → freetext  [Ctrl+Y] clear  [Esc] cancel",
+                    );
                 }
                 KeyCode::Enter => {
                     // Re-run last search with current filters.
@@ -397,11 +469,26 @@ fn handle_library_keys(
                         fire_search(state, web_api, web_tx);
                     }
                 }
+                KeyCode::Char('n') | KeyCode::Char('N') => {
+                    state.library.filter_tag = state.library.filter_tag.cycle();
+                    let label = state.library.filter_tag.label().unwrap_or("off");
+                    state.set_status(format!("tag: {label}"));
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    state.library.sort = state.library.sort.cycle();
+                    state.library.apply_sort();
+                    state.set_status(format!("sort: {}", state.library.sort.label()));
+                }
                 KeyCode::Char(c @ '1'..='5') => {
                     let idx = (c as usize) - ('1' as usize);
                     if let Some(preset) = state.config.ui.search_presets.get(idx).cloned() {
                         state.library.filter_genre = preset.genre.clone();
                         state.library.filter_year = preset.year.clone();
+                        state.library.filter_tag = match preset.tag.as_str() {
+                            "new" => app::TagFilter::New,
+                            "hipster" => app::TagFilter::Hipster,
+                            _ => app::TagFilter::None,
+                        };
                         state.set_status(format!("Preset: {}", preset.name));
                         fire_search(state, web_api, web_tx);
                     }
@@ -415,7 +502,8 @@ fn handle_library_keys(
                     state.library.selected = state.library.selected.saturating_sub(1);
                 }
                 KeyCode::Char('l') | KeyCode::Char('L') => {
-                    if let Some(track) = state.library.results.get(state.library.selected).cloned() {
+                    if let Some(track) = state.library.results.get(state.library.selected).cloned()
+                    {
                         let title = track.title.clone();
                         state.load_to_deck(&track, app::ActiveDeck::A);
                         state.set_status(format!("Loaded \"{title}\" → Deck A"));
@@ -424,7 +512,8 @@ fn handle_library_keys(
                     }
                 }
                 KeyCode::Char('r') | KeyCode::Char('R') => {
-                    if let Some(track) = state.library.results.get(state.library.selected).cloned() {
+                    if let Some(track) = state.library.results.get(state.library.selected).cloned()
+                    {
                         let title = track.title.clone();
                         state.load_to_deck(&track, app::ActiveDeck::B);
                         state.set_status(format!("Loaded \"{title}\" → Deck B"));

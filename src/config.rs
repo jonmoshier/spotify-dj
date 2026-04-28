@@ -37,6 +37,8 @@ pub struct SearchPreset {
     pub genre: String,
     #[serde(default)]
     pub year: String,
+    #[serde(default)]
+    pub tag: String,
 }
 
 impl Default for Config {

@@ -1,4 +1,4 @@
-use crate::app::{LibraryState, SearchFocus};
+use crate::app::{LibraryState, SearchFocus, SortOrder};
 use crate::config::SearchPreset;
 use ratatui::{
     Frame,
@@ -16,7 +16,11 @@ pub fn draw_library(
     active_bpm: Option<f32>,
     is_focused: bool,
 ) {
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     let outer = Block::default()
         .borders(Borders::ALL)
@@ -27,11 +31,15 @@ pub fn draw_library(
     frame.render_widget(outer, area);
 
     let show_bpm = active_bpm.is_some();
+    let show_sort = library.sort != SortOrder::Relevance && !library.results.is_empty();
     let mut constraints = vec![
         Constraint::Length(1), // freetext row
         Constraint::Length(1), // filter row
         Constraint::Min(1),    // results
     ];
+    if show_sort {
+        constraints.push(Constraint::Length(1));
+    }
     if show_bpm {
         constraints.push(Constraint::Length(1));
     }
@@ -49,10 +57,19 @@ pub fn draw_library(
 
     let query_span = if library.search_focus == SearchFocus::Freetext {
         let text = format!("{}▌", library.search_query);
-        Span::styled(text, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        Span::styled(
+            text,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if library.search_query.is_empty() {
         Span::styled(
-            if is_focused { "[/] title · artist" } else { "" },
+            if is_focused {
+                "[/] title · artist"
+            } else {
+                ""
+            },
             Style::default().fg(Color::DarkGray),
         )
     } else {
@@ -112,7 +129,13 @@ pub fn draw_library(
                     meta_parts.push(year.to_string());
                 }
                 if !t.genres.is_empty() {
-                    let genres = t.genres.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                    let genres = t
+                        .genres
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     meta_parts.push(genres);
                 }
 
@@ -148,6 +171,20 @@ pub fn draw_library(
         .with_offset(offset);
     frame.render_stateful_widget(list, rows[2], &mut list_state);
 
+    // --- Sort indicator ---
+    let mut next_row = 3usize;
+    if show_sort {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("sorted by ", Style::default().fg(Color::DarkGray)),
+                Span::styled(library.sort.label(), Style::default().fg(Color::Cyan)),
+                Span::styled("  [S] cycle", Style::default().fg(Color::DarkGray)),
+            ])),
+            rows[next_row],
+        );
+        next_row += 1;
+    }
+
     // --- BPM reference ---
     if let (Some(bpm), true) = (active_bpm, show_bpm) {
         frame.render_widget(
@@ -155,7 +192,7 @@ pub fn draw_library(
                 format!("Active: ~{bpm:.0} BPM"),
                 Style::default().fg(Color::DarkGray),
             )),
-            rows[3],
+            rows[next_row],
         );
     }
 }
@@ -187,7 +224,9 @@ fn field_spans<'a>(
     separator: &'a str,
 ) -> Vec<Span<'a>> {
     let style = if is_active {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
     } else if value.is_empty() {
         Style::default().fg(Color::DarkGray)
     } else {
@@ -236,29 +275,42 @@ fn draw_filter_idle<'a>(
     let has_title = !library.filter_title.is_empty();
     let has_genre = !library.filter_genre.is_empty();
     let has_year = !library.filter_year.is_empty();
+    let has_tag = library.filter_tag != crate::app::TagFilter::None;
 
-    if has_artist || has_title || has_genre || has_year {
+    if has_artist || has_title || has_genre || has_year || has_tag {
         let mut spans: Vec<Span> = Vec::new();
-        let active_fields: Vec<(&str, &str)> = [
+        let mut first = true;
+
+        let text_fields: &[(&str, &str)] = &[
             ("artist", library.filter_artist.as_str()),
             ("title", library.filter_title.as_str()),
             ("genre", library.filter_genre.as_str()),
             ("year", library.filter_year.as_str()),
-        ]
-        .into_iter()
-        .filter(|(_, v)| !v.is_empty())
-        .collect();
-
-        for (i, (label, value)) in active_fields.iter().enumerate() {
-            if i > 0 {
+        ];
+        for (label, value) in text_fields.iter().filter(|(_, v)| !v.is_empty()) {
+            if !first {
                 spans.push(Span::raw("  "));
             }
             spans.push(Span::styled(
                 format!("{label}:{value}"),
                 Style::default().fg(Color::Cyan),
             ));
+            first = false;
         }
-        spans.push(Span::styled("  [^X] clear", Style::default().fg(Color::DarkGray)));
+        if let Some(tag_label) = library.filter_tag.label() {
+            if !first {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(
+                format!("tag:{tag_label}"),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+
+        spans.push(Span::styled(
+            "  [^X] clear",
+            Style::default().fg(Color::DarkGray),
+        ));
         Paragraph::new(Line::from(spans))
     } else if !presets.is_empty() && is_focused {
         let spans: Vec<Span> = presets
@@ -278,7 +330,9 @@ fn draw_filter_idle<'a>(
             Span::styled("[A] artist  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[T] title  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[G] genre  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[Y] year", Style::default().fg(Color::DarkGray)),
+            Span::styled("[Y] year  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[N] tag  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[S] sort", Style::default().fg(Color::DarkGray)),
         ]))
     } else {
         Paragraph::new("")
