@@ -47,7 +47,11 @@ impl SpotifyWebApi {
             .filter_map(|t| {
                 let id = t.id?.to_string();
                 let first_artist = t.artists.into_iter().next()?;
-                let artist_id = first_artist.id.as_ref().map(|a| a.id().to_string()).unwrap_or_default();
+                let artist_id = first_artist
+                    .id
+                    .as_ref()
+                    .map(|a| a.id().to_string())
+                    .unwrap_or_default();
                 let artist = first_artist.name;
                 let album = t.album.name;
                 let release_year = t.album.release_date.as_deref().and_then(parse_year);

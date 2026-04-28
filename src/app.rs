@@ -83,6 +83,69 @@ impl SearchFocus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TagFilter {
+    #[default]
+    None,
+    New,
+    Hipster,
+}
+
+impl TagFilter {
+    pub fn cycle(self) -> Self {
+        match self {
+            TagFilter::None => TagFilter::New,
+            TagFilter::New => TagFilter::Hipster,
+            TagFilter::Hipster => TagFilter::None,
+        }
+    }
+
+    pub fn as_query_str(self) -> Option<&'static str> {
+        match self {
+            TagFilter::None => None,
+            TagFilter::New => Some("tag:new"),
+            TagFilter::Hipster => Some("tag:hipster"),
+        }
+    }
+
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            TagFilter::None => None,
+            TagFilter::New => Some("new"),
+            TagFilter::Hipster => Some("hipster"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortOrder {
+    #[default]
+    Relevance,
+    Popularity,
+    Duration,
+    Artist,
+}
+
+impl SortOrder {
+    pub fn cycle(self) -> Self {
+        match self {
+            SortOrder::Relevance => SortOrder::Popularity,
+            SortOrder::Popularity => SortOrder::Duration,
+            SortOrder::Duration => SortOrder::Artist,
+            SortOrder::Artist => SortOrder::Relevance,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortOrder::Relevance => "relevance",
+            SortOrder::Popularity => "popularity",
+            SortOrder::Duration => "duration",
+            SortOrder::Artist => "artist",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LibraryState {
     pub search_query: String,
@@ -90,8 +153,11 @@ pub struct LibraryState {
     pub filter_year: String,
     pub filter_artist: String,
     pub filter_title: String,
+    pub filter_tag: TagFilter,
+    pub sort: SortOrder,
     pub search_focus: SearchFocus,
     pub results: Vec<TrackSummary>,
+    results_original: Vec<TrackSummary>,
     pub selected: usize,
 }
 
@@ -113,6 +179,9 @@ impl LibraryState {
         if !self.filter_year.trim().is_empty() {
             parts.push(format!("year:{}", self.filter_year.trim()));
         }
+        if let Some(tag) = self.filter_tag.as_query_str() {
+            parts.push(tag.to_string());
+        }
         parts.join(" ")
     }
 
@@ -121,6 +190,7 @@ impl LibraryState {
         self.filter_year.clear();
         self.filter_artist.clear();
         self.filter_title.clear();
+        self.filter_tag = TagFilter::None;
     }
 
     pub fn has_filters(&self) -> bool {
@@ -128,6 +198,19 @@ impl LibraryState {
             || !self.filter_year.is_empty()
             || !self.filter_artist.is_empty()
             || !self.filter_title.is_empty()
+            || self.filter_tag != TagFilter::None
+    }
+
+    pub fn apply_sort(&mut self) {
+        match self.sort {
+            SortOrder::Relevance => self.results = self.results_original.clone(),
+            SortOrder::Popularity => self.results.sort_by(|a, b| b.popularity.cmp(&a.popularity)),
+            SortOrder::Duration => self
+                .results
+                .sort_by(|a, b| b.duration_ms.cmp(&a.duration_ms)),
+            SortOrder::Artist => self.results.sort_by(|a, b| a.artist.cmp(&b.artist)),
+        }
+        self.selected = 0;
     }
 }
 
@@ -480,8 +563,10 @@ impl AppState {
     pub fn apply_web_api_event(&mut self, event: WebApiEvent) {
         match event {
             WebApiEvent::SearchResults(results) => {
+                self.library.results_original = results.clone();
                 self.library.results = results;
                 self.library.selected = 0;
+                self.library.apply_sort();
             }
             WebApiEvent::GenreResults(genre_map) => {
                 for track in &mut self.library.results {
