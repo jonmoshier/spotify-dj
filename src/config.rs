@@ -129,6 +129,7 @@ mod tests {
             ui: UiConfig {
                 crossfade_duration_secs: 5,
                 default_volume: 60,
+                search_presets: Vec::new(),
             },
         };
         let serialized = toml::to_string_pretty(&original).unwrap();
