@@ -14,13 +14,18 @@ use ratatui::{
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
 
-    // Outer vertical split: decks (top 60%) | bottom bar (40%)
+    // Three rows: decks | mixer | library + status
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([
+            Constraint::Length(14), // decks
+            Constraint::Length(6),  // mixer
+            Constraint::Min(6),     // library
+            Constraint::Length(3),  // status bar
+        ])
         .split(area);
 
-    // Top row: Deck A | Deck B
+    // Top row: Deck A | Deck B side by side
     let deck_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -48,32 +53,26 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         &state.fft_peaks,
     );
 
-    // Bottom row: library (50%) | mixer + status (50%)
-    let bottom_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[1]);
-
-    library::draw_library(
-        frame,
-        bottom_cols[0],
-        &state.library,
-        state.focus == UiFocus::Library,
-    );
-
-    let mixer_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(3)])
-        .split(bottom_cols[1]);
-
+    // Mixer spans full width
     mixer::draw_mixer(
         frame,
-        mixer_rows[0],
+        rows[1],
         state.crossfader,
         state.focus == UiFocus::Mixer,
         state.auto_fade,
     );
-    draw_status(frame, mixer_rows[1], state);
+
+    // Library spans full width
+    library::draw_library(
+        frame,
+        rows[2],
+        &state.library,
+        &state.config.ui.search_presets,
+        state.active_deck_state().bpm,
+        state.focus == UiFocus::Library,
+    );
+
+    draw_status(frame, rows[3], state);
 
     if state.show_help {
         draw_help(frame);

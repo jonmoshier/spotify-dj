@@ -26,6 +26,17 @@ pub struct PlaybackConfig {
 pub struct UiConfig {
     pub crossfade_duration_secs: u64,
     pub default_volume: u8,
+    #[serde(default)]
+    pub search_presets: Vec<SearchPreset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SearchPreset {
+    pub name: String,
+    #[serde(default)]
+    pub genre: String,
+    #[serde(default)]
+    pub year: String,
 }
 
 impl Default for Config {
@@ -41,6 +52,7 @@ impl Default for Config {
             ui: UiConfig {
                 crossfade_duration_secs: 10,
                 default_volume: 80,
+                search_presets: Vec::new(),
             },
         }
     }

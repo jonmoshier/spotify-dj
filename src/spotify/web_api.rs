@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use rspotify::{
     AuthCodePkceSpotify,
-    model::{PlayableId, SearchResult, SearchType, TrackId},
+    model::{ArtistId, PlayableId, SearchResult, SearchType, TrackId},
     prelude::*,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::app::TrackSummary;
@@ -45,16 +46,26 @@ impl SpotifyWebApi {
             .into_iter()
             .filter_map(|t| {
                 let id = t.id?.to_string();
-                let artist = t
-                    .artists
-                    .first()
-                    .map(|a| a.name.clone())
-                    .unwrap_or_default();
+                let first_artist = t.artists.into_iter().next()?;
+                let artist_id = first_artist.id.as_ref().map(|a| a.id().to_string()).unwrap_or_default();
+                let artist = first_artist.name;
+                let album = t.album.name;
+                let release_year = t.album.release_date.as_deref().and_then(parse_year);
+                let duration_ms = t.duration.num_milliseconds().max(0) as u32;
+                #[allow(deprecated)]
+                let popularity = (t.popularity as u8).min(100);
+
                 Some(TrackSummary {
                     id,
+                    artist_id,
                     title: t.name,
                     artist,
-                    duration_ms: t.duration.num_milliseconds().max(0) as u32,
+                    album,
+                    release_year,
+                    duration_ms,
+                    popularity,
+                    explicit: t.explicit,
+                    genres: Vec::new(), // filled in by fetch_artist_genres
                     bpm: None,
                 })
             })
@@ -62,4 +73,41 @@ impl SpotifyWebApi {
 
         Ok(summaries)
     }
+
+    /// Batch-fetch genres for a list of artist IDs (max 50 per call).
+    pub async fn fetch_artist_genres(
+        &self,
+        artist_ids: &[String],
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let ids: Vec<ArtistId<'_>> = artist_ids
+            .iter()
+            .filter(|id| !id.is_empty())
+            .filter_map(|id| ArtistId::from_id(id.as_str()).ok())
+            .collect();
+
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut map = HashMap::new();
+        for chunk in ids.chunks(50) {
+            let artists = self
+                .client
+                .artists(chunk.iter().cloned())
+                .await
+                .context("fetch_artist_genres failed")?;
+
+            for artist in artists {
+                #[allow(deprecated)]
+                let genres = artist.genres;
+                map.insert(artist.id.id().to_string(), genres);
+            }
+        }
+
+        Ok(map)
+    }
+}
+
+fn parse_year(date: &str) -> Option<u16> {
+    date.get(..4)?.parse().ok()
 }

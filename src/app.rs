@@ -24,6 +24,7 @@ pub struct CrossfadeState {
 
 pub enum WebApiEvent {
     SearchResults(Vec<TrackSummary>),
+    GenreResults(std::collections::HashMap<String, Vec<String>>), // artist_id → genres
 }
 
 /// Which panel currently has keyboard focus.
@@ -65,21 +66,83 @@ pub struct DeckState {
     pub volume: u8, // 0–100
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchFocus {
+    #[default]
+    None,
+    Freetext,
+    Genre,
+    Year,
+    Artist,
+    Title,
+}
+
+impl SearchFocus {
+    pub fn is_active(self) -> bool {
+        self != SearchFocus::None
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LibraryState {
     pub search_query: String,
+    pub filter_genre: String,
+    pub filter_year: String,
+    pub filter_artist: String,
+    pub filter_title: String,
+    pub search_focus: SearchFocus,
     pub results: Vec<TrackSummary>,
     pub selected: usize,
-    pub is_searching: bool,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+impl LibraryState {
+    pub fn build_query(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if !self.search_query.trim().is_empty() {
+            parts.push(self.search_query.trim().to_string());
+        }
+        if !self.filter_artist.trim().is_empty() {
+            parts.push(format!("artist:{}", self.filter_artist.trim()));
+        }
+        if !self.filter_title.trim().is_empty() {
+            parts.push(format!("track:{}", self.filter_title.trim()));
+        }
+        if !self.filter_genre.trim().is_empty() {
+            parts.push(format!("genre:{}", self.filter_genre.trim()));
+        }
+        if !self.filter_year.trim().is_empty() {
+            parts.push(format!("year:{}", self.filter_year.trim()));
+        }
+        parts.join(" ")
+    }
+
+    pub fn clear_filters(&mut self) {
+        self.filter_genre.clear();
+        self.filter_year.clear();
+        self.filter_artist.clear();
+        self.filter_title.clear();
+    }
+
+    pub fn has_filters(&self) -> bool {
+        !self.filter_genre.is_empty()
+            || !self.filter_year.is_empty()
+            || !self.filter_artist.is_empty()
+            || !self.filter_title.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct TrackSummary {
     pub id: String,
+    pub artist_id: String,
     pub title: String,
     pub artist: String,
+    pub album: String,
+    pub release_year: Option<u16>,
     pub duration_ms: u32,
+    pub popularity: u8,
+    pub explicit: bool,
+    pub genres: Vec<String>,
     pub bpm: Option<f32>,
 }
 
@@ -419,6 +482,13 @@ impl AppState {
             WebApiEvent::SearchResults(results) => {
                 self.library.results = results;
                 self.library.selected = 0;
+            }
+            WebApiEvent::GenreResults(genre_map) => {
+                for track in &mut self.library.results {
+                    if let Some(genres) = genre_map.get(&track.artist_id) {
+                        track.genres = genres.clone();
+                    }
+                }
             }
         }
     }
