@@ -70,6 +70,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         &state.config.ui.search_presets,
         state.active_deck_state().bpm,
         state.focus == UiFocus::Library,
+        state.queue_mode,
     );
 
     draw_status(frame, rows[3], state);
@@ -105,6 +106,8 @@ fn draw_help(frame: &mut Frame) {
         ("Library", ""),
         ("/", "search"),
         ("↑ ↓  or  scroll", "navigate results"),
+        ("Enter", "play selected + start queue"),
+        ("P", "toggle queue mode"),
         ("L", "load selected → Deck A"),
         ("R", "load selected → Deck B"),
         ("", ""),
