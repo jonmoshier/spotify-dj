@@ -511,9 +511,7 @@ fn handle_library_keys(
                         state.auto_fade = true;
                         state.auto_fade_last_fired_uri = None;
                         state.queue_next_idx = None;
-                        state.set_status(format!(
-                            "Queue: playing \"{title}\" — [P] stop queue"
-                        ));
+                        state.set_status(format!("Queue: playing \"{title}\" — [P] stop queue"));
                         state.queue_preload_next();
                         let api = Arc::clone(web_api);
                         let device_id = player.device_id.clone();
