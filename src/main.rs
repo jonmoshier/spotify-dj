@@ -561,12 +561,12 @@ fn handle_library_keys(
                         fire_search(state, web_api, web_tx);
                     }
                 }
-                KeyCode::Down => {
+                KeyCode::Down | KeyCode::Char('j') => {
                     if state.library.selected + 1 < state.library.results.len() {
                         state.library.selected += 1;
                     }
                 }
-                KeyCode::Up => {
+                KeyCode::Up | KeyCode::Char('k') => {
                     state.library.selected = state.library.selected.saturating_sub(1);
                 }
                 KeyCode::Char('l') | KeyCode::Char('L') => {
