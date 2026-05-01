@@ -250,6 +250,10 @@ pub struct AppState {
     /// (e.g. after the position briefly oscillates near the end).
     pub auto_fade_last_fired_uri: Option<String>,
     pub show_help: bool,
+    /// When true, automatically play through the library list after each track ends.
+    pub queue_mode: bool,
+    /// Library index of the track preloaded to the inactive deck for the next queue step.
+    pub queue_next_idx: Option<usize>,
 }
 
 impl AppState {
@@ -276,6 +280,8 @@ impl AppState {
             show_help: false,
             auto_fade: false,
             auto_fade_last_fired_uri: None,
+            queue_mode: false,
+            queue_next_idx: None,
         }
     }
 
@@ -494,6 +500,26 @@ impl AppState {
             ActiveDeck::A => -1.0,
             ActiveDeck::B => 1.0,
         };
+    }
+
+    /// In queue mode, load the next library track (selected+1) onto the inactive deck
+    /// so auto_fade can pick it up. Idempotent: skips if that index is already preloaded.
+    pub fn queue_preload_next(&mut self) {
+        if !self.queue_mode {
+            return;
+        }
+        let next_idx = self.library.selected + 1;
+        if self.queue_next_idx == Some(next_idx) {
+            return;
+        }
+        if let Some(track) = self.library.results.get(next_idx).cloned() {
+            let inactive = match self.active_deck {
+                ActiveDeck::A => ActiveDeck::B,
+                ActiveDeck::B => ActiveDeck::A,
+            };
+            self.load_to_deck(&track, inactive);
+            self.queue_next_idx = Some(next_idx);
+        }
     }
 
     pub fn cycle_focus(&mut self) {

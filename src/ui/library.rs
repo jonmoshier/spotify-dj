@@ -15,6 +15,7 @@ pub fn draw_library(
     presets: &[SearchPreset],
     active_bpm: Option<f32>,
     is_focused: bool,
+    queue_mode: bool,
 ) {
     let border_color = if is_focused {
         Color::Cyan
@@ -22,9 +23,15 @@ pub fn draw_library(
         Color::DarkGray
     };
 
+    let title = if queue_mode {
+        " Library [queue] "
+    } else {
+        " Library "
+    };
+
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title(" Library ")
+        .title(title)
         .border_style(Style::default().fg(border_color));
 
     let inner = outer.inner(area);
@@ -327,6 +334,7 @@ fn draw_filter_idle<'a>(
         Paragraph::new(Line::from(spans))
     } else if is_focused {
         Paragraph::new(Line::from(vec![
+            Span::styled("[Enter] play+queue  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[A] artist  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[T] title  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[G] genre  ", Style::default().fg(Color::DarkGray)),

@@ -126,6 +126,33 @@ async fn run_event_loop(
                     Some(PlayerEvent::TrackChanged { .. }) => {
                         state.apply_player_event(event.unwrap());
                     }
+                    Some(PlayerEvent::EndOfTrack { .. }) => {
+                        state.apply_player_event(event.unwrap());
+                        if state.queue_mode && state.crossfade.is_none() {
+                            let next_idx = state.queue_next_idx.take()
+                                .unwrap_or_else(|| state.library.selected + 1);
+                            if next_idx < state.library.results.len() {
+                                if let Some(track) = state.library.results.get(next_idx).cloned() {
+                                    let uri = track.id.clone();
+                                    let title = track.title.clone();
+                                    state.library.selected = next_idx;
+                                    state.auto_fade_last_fired_uri = None;
+                                    state.queue_preload_next();
+                                    state.set_status(format!("Queue: \"{title}\""));
+                                    let api = Arc::clone(&web_api);
+                                    let device_id = player.device_id.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = api.play_track(&uri, &device_id).await {
+                                            eprintln!("queue next error: {e:#}");
+                                        }
+                                    });
+                                }
+                            } else {
+                                state.queue_mode = false;
+                                state.set_status("Queue: end of results");
+                            }
+                        }
+                    }
                     Some(ev) => state.apply_player_event(ev),
                     None => break,
                 }
@@ -167,6 +194,9 @@ async fn run_event_loop(
                     state.set_status(format!("Auto-fading over {secs}s…"));
                 }
 
+                // Queue mode: keep the inactive deck primed for the next auto-fade.
+                state.queue_preload_next();
+
                 // Advance crossfade state machine
                 match state.tick_crossfade(100) {
                     CrossfadeTick::PlayTrack(uri) => {
@@ -178,7 +208,15 @@ async fn run_event_loop(
                             }
                         });
                     }
-                    CrossfadeTick::Complete => state.finish_crossfade(),
+                    CrossfadeTick::Complete => {
+                        state.finish_crossfade();
+                        if state.queue_mode {
+                            if let Some(next_idx) = state.queue_next_idx.take() {
+                                state.library.selected = next_idx;
+                            }
+                            state.queue_preload_next();
+                        }
+                    }
                     CrossfadeTick::Continue => {}
                 }
 
@@ -251,7 +289,7 @@ fn handle_key(
     }
 
     match state.focus {
-        UiFocus::Library => handle_library_keys(code, modifiers, state, web_api, web_tx),
+        UiFocus::Library => handle_library_keys(code, modifiers, state, player, web_api, web_tx),
         UiFocus::DeckA | UiFocus::DeckB => handle_deck_keys(code, state, player, web_api),
         UiFocus::Mixer => handle_mixer_keys(code, state, player),
     }
@@ -304,6 +342,7 @@ fn handle_library_keys(
     code: KeyCode,
     modifiers: KeyModifiers,
     state: &mut AppState,
+    player: &SpotifyPlayer,
     web_api: &Arc<SpotifyWebApi>,
     web_tx: &mpsc::Sender<WebApiEvent>,
 ) {
@@ -464,9 +503,38 @@ fn handle_library_keys(
                     );
                 }
                 KeyCode::Enter => {
-                    // Re-run last search with current filters.
-                    if !state.library.build_query().is_empty() {
+                    if let Some(track) = state.library.results.get(state.library.selected).cloned()
+                    {
+                        let uri = track.id.clone();
+                        let title = track.title.clone();
+                        state.queue_mode = true;
+                        state.auto_fade = true;
+                        state.auto_fade_last_fired_uri = None;
+                        state.queue_next_idx = None;
+                        state.set_status(format!("Queue: playing \"{title}\" — [P] stop queue"));
+                        state.queue_preload_next();
+                        let api = Arc::clone(web_api);
+                        let device_id = player.device_id.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = api.play_track(&uri, &device_id).await {
+                                eprintln!("queue start error: {e:#}");
+                            }
+                        });
+                    } else if !state.library.build_query().is_empty() {
+                        // No results yet — treat as search re-run
                         fire_search(state, web_api, web_tx);
+                    }
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    state.queue_mode = !state.queue_mode;
+                    if state.queue_mode {
+                        state.auto_fade = true;
+                        state.queue_next_idx = None;
+                        state.queue_preload_next();
+                        state.set_status("Queue mode ON — [Enter] to start from selection");
+                    } else {
+                        state.queue_next_idx = None;
+                        state.set_status("Queue mode OFF");
                     }
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
