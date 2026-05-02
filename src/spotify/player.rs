@@ -21,7 +21,6 @@ use crate::config::Config;
 pub struct SpotifyPlayer {
     pub spirc: Spirc,
     pub player: Arc<Player>,
-    pub session: Session,
     pub bpm_rx: watch::Receiver<Option<f32>>,
     pub bands_rx: watch::Receiver<Vec<f32>>,
     pub device_id: String,
@@ -94,7 +93,6 @@ impl SpotifyPlayer {
         Ok(Self {
             spirc,
             player,
-            session,
             bpm_rx,
             bands_rx,
             device_id,
