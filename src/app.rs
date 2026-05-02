@@ -77,12 +77,6 @@ pub enum SearchFocus {
     Title,
 }
 
-impl SearchFocus {
-    pub fn is_active(self) -> bool {
-        self != SearchFocus::None
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagFilter {
     #[default]
@@ -191,14 +185,6 @@ impl LibraryState {
         self.filter_artist.clear();
         self.filter_title.clear();
         self.filter_tag = TagFilter::None;
-    }
-
-    pub fn has_filters(&self) -> bool {
-        !self.filter_genre.is_empty()
-            || !self.filter_year.is_empty()
-            || !self.filter_artist.is_empty()
-            || !self.filter_title.is_empty()
-            || self.filter_tag != TagFilter::None
     }
 
     pub fn apply_sort(&mut self) {

@@ -52,7 +52,8 @@ async fn main() -> Result<()> {
         .context("Spotify authentication failed")?;
 
     let access_token = auth.access_token().await?;
-    let web_api = SpotifyWebApi::new(Arc::new(auth.client));
+    let client = auth.into_client_with_refresh();
+    let web_api = SpotifyWebApi::new(client);
 
     println!("Authenticated! Connecting to Spotify...");
     let player = SpotifyPlayer::new(&config, access_token)

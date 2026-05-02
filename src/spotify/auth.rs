@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::time::{Duration, interval};
 
 const REDIRECT_PORT: u16 = 8888;
 const REDIRECT_URI: &str = "http://127.0.0.1:8888/callback";
@@ -150,45 +152,7 @@ impl SpotifyAuth {
     }
 
     async fn save_tokens(&self) -> Result<()> {
-        let locked = self.client.token.lock().await.unwrap();
-        let token = locked.as_ref().context("no token to save")?;
-
-        let stored = StoredTokens {
-            access_token: token.access_token.clone(),
-            refresh_token: token.refresh_token.clone(),
-            expires_at: token.expires_at.map(|dt| dt.to_rfc3339()),
-            token_type: Some("Bearer".to_string()),
-            scopes: token.scopes.iter().cloned().collect(),
-        };
-
-        if let Some(parent) = self.token_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let text = serde_json::to_string_pretty(&stored).context("could not serialize tokens")?;
-
-        // Write with restricted permissions (owner read/write only).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&self.token_path)?
-                .write_all(text.as_bytes())?;
-        }
-        #[cfg(not(unix))]
-        {
-            fs::write(&self.token_path, text)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn clear_tokens(&self) {
-        fs::remove_file(&self.token_path).ok();
+        save_tokens_to_path(&self.client, &self.token_path).await
     }
 
     /// Extract the current access token for use with librespot.
@@ -197,4 +161,64 @@ impl SpotifyAuth {
         let token = locked.as_ref().context("not authenticated")?;
         Ok(token.access_token.clone())
     }
+
+    /// Consume this auth handle, wrap the client in an Arc, and spawn a background task
+    /// that refreshes and saves the token every 50 minutes (before the 1-hour expiry).
+    pub fn into_client_with_refresh(self) -> Arc<AuthCodePkceSpotify> {
+        let client = Arc::new(self.client);
+        let token_path = self.token_path;
+        let client_bg = client.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(50 * 60));
+            ticker.tick().await; // skip the immediate first tick
+            loop {
+                ticker.tick().await;
+                if let Err(e) = client_bg.refresh_token().await {
+                    eprintln!("token refresh failed: {e}");
+                    continue;
+                }
+                if let Err(e) = save_tokens_to_path(&client_bg, &token_path).await {
+                    eprintln!("token save after refresh failed: {e}");
+                }
+            }
+        });
+        client
+    }
+}
+
+async fn save_tokens_to_path(client: &AuthCodePkceSpotify, path: &Path) -> Result<()> {
+    let locked = client.token.lock().await.unwrap();
+    let token = locked.as_ref().context("no token to save")?;
+
+    let stored = StoredTokens {
+        access_token: token.access_token.clone(),
+        refresh_token: token.refresh_token.clone(),
+        expires_at: token.expires_at.map(|dt| dt.to_rfc3339()),
+        token_type: Some("Bearer".to_string()),
+        scopes: token.scopes.iter().cloned().collect(),
+    };
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let text = serde_json::to_string_pretty(&stored).context("could not serialize tokens")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?
+            .write_all(text.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, text)?;
+    }
+
+    Ok(())
 }

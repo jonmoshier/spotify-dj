@@ -94,17 +94,11 @@ impl SpotifyWebApi {
         }
 
         let mut map = HashMap::new();
-        for chunk in ids.chunks(50) {
-            let artists = self
-                .client
-                .artists(chunk.iter().cloned())
-                .await
-                .context("fetch_artist_genres failed")?;
-
-            for artist in artists {
+        for id in ids {
+            if let Ok(artist) = self.client.artist(id).await {
+                // genres field is deprecated by Spotify but remains the only available source
                 #[allow(deprecated)]
-                let genres = artist.genres;
-                map.insert(artist.id.id().to_string(), genres);
+                map.insert(artist.id.id().to_string(), artist.genres);
             }
         }
 
